@@ -1606,3 +1606,97 @@ unordered_set 通过一个**哈希函数**，将对象的值映射到一个数�
 
 ## 第二讲：源代码
 
+### 3. OOP(面向对象编程)和GP(泛型编程)
+
+OOP将 data 和 methods 结合在一起,GP却将他们两个分开来
+
+采用GP:
+
+1.容器Containers和算法Algorithms可以各自闭门造车，通过迭代器Iterator连接起来即可
+
+2.算法ALgorithms通过迭代器Iterator确定操作范围，并通过Iterator取用Container元素
+
+### 4.随机访问迭代器
+
+随机访问迭代器 RandomAccessIterator：能够随机访问容器中的任一元素，例如vector单端数组
+
+这样的迭代器可以进行+ -号的运算，例如:
+
+```c++
+auto mid=(v.begin()+v.end())/2 //随访访问迭代器才可以这么操作
+```
+
+提到这里，就不得不提一下算法库里的全局函数 sort() 了
+
+**sort()函数内部实现的机制调用了随机访问迭代器，进行了+-的运算，所以能调用的前提只能是随机访问迭代器，比如vector,deque**
+
+**所以由于list不满足这个迭代器，所以他不能调用全局sort函数，只能用自己类实现的sort函数，即 l.sort()**
+
+```c++
+#include <iostream>
+using namespace std;
+#include <list>
+#include <algorithm>
+
+template <typename Type>
+void print(list<Type> &l)
+{
+    for_each(l.begin(), l.end(), [&](auto val)
+             { cout << val << ' '; });
+    cout << endl;
+}
+
+int main()
+{
+    list<int> l;
+    for (int i = 0; i < 10; ++i)
+        l.push_back(9 - i);
+    print(l);
+    // sort(l.begin(), l.end(), less_equal<int>());//用不了 因为他不是RandomAccessIterator Error!!!
+    l.sort(less_equal<int>());
+    print(l);
+
+    return 0;
+}
+```
+
+### 5.GP 泛型编程举一个例子
+
+```c++
+#include <iostream>
+using namespace std;
+
+namespace fuck
+{
+    template <typename Type>
+    inline const Type &max(const Type &a, const Type &b)
+    {
+        return a < b ? b : a;
+    }
+
+    template <typename Type, class functor>
+    inline const Type &max(const Type &a, const Type &b, functor &cmp)
+    {
+        return cmp(a, b) ? b : a;
+    }
+}
+
+bool strCmp(const string &s1, const string &s2)
+{
+    return s1.size() < s2.size();
+}
+
+void test()
+{
+    cout << "max of zoo and hello: " << fuck::max(string("zoo"), string("hello")) << endl;         // zoo
+    cout << "max of zoo and hello: " << fuck::max(string("zoo"), string("hello"), strCmp) << endl; // hello
+}
+
+int main()
+{
+    test();
+    return 0;
+}
+```
+
+这个例子很简单，就不多做解释了
