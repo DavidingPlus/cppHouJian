@@ -1,7 +1,3 @@
-
-
-
-
 # 侯老师c++课程
 
 # 面向对象高级开发
@@ -1700,3 +1696,229 @@ int main()
 ```
 
 这个例子很简单，就不多做解释了
+
+## 4.16
+
+### 1.重载new运算符 operator new
+
+![image-20230416094923459](D:\Typora\Images\image-20230416094923459.png)
+
+可以看到，在c++当中，new关键字在调用之后都会走到c语言的malloc函数来分配内存，然后malloc函数分配内存的机制就是上面那个内存块所示
+
+<img src="D:\Typora\Images\image-20230416095052581.png" alt="image-20230416095052581" style="zoom: 67%;" />
+
+size所包含的内容才是我想要的存放数据的内容部分，但是malloc会给我们开辟比size更大的空间，这些在另一门课里面会具体谈到。
+
+### 2.分配器 allocators
+
+### VC6 allocator
+
+VC6里面的分配器具体实现如下图：
+
+![image-20230416095559995](D:\Typora\Images\image-20230416095559995.png)
+
+分配器当中最重要的就是 **allocate 函数 和 deallocate 函数**
+
+从上图中可以看出，VC提供的分配器在分配的时候，allocate函数在调用的时候会调用 new 关键字，也就是会调用 malloc 函数
+
+在释放内存的时候调用deallocate 函数，也就是调用delete关键字，最终就是调用free 函数
+
+结论：
+
+![image-20230416095953933](D:\Typora\Images\image-20230416095953933.png)
+
+对于这个allocator，如果硬要用的话可以这么使用
+
+```c++
+    // 建立分配器
+    int *p = allocator<int>().allocate(512, (int *)0);
+    // 归还
+    allocator<int>().deallocate(p, 512);//在归还的时候还需要之前的大小，所以非常不好用!!!
+```
+
+### BC++ allocator
+
+BC5 STL中对分配器的设计和VC6一样，没有特殊设计
+
+![image-20230416101021861](D:\Typora\Images\image-20230416101021861.png)
+
+操作略
+
+### GCC2.9 allocator
+
+和前面两个一样，也没有特殊设计，就是简单的调用malloc 和 free分配和释放内存
+
+![image-20230416101451151](D:\Typora\Images\image-20230416101451151.png)
+
+右边这一段注释的意思就是虽然这里实现了符合标准的allocator，但是他自己的容器从来不去用这些分配器，这些分配器都有一个致命的缺点，就是因为本质是在调用mallloc和free函数，根据前面的内存分配机制很容易看出会产生很多的其他空间，从而被浪费，所以开销相对比较大，一般不用
+
+### GCC2.9 自己使用的分配器：alloc(不是allocator!!!)
+
+这个分配器想必比allocator要好用的多
+
+![image-20230416102010067](D:\Typora\Images\image-20230416102010067.png)
+
+其具体实现如下：
+
+![image-20230416102442772](D:\Typora\Images\image-20230416102442772.png)
+
+**怎么实现的呢？设计了16个链表，每个链表管理特定大小的区块，#0管理8个字节，#1管理16，以此类推，最后#15管理168个字节。所有使用这个分配器的元素的大小会被调整到8的倍数，比如50的大小会被调整到56。如果该链表下面没有挂内存块，那么会向操作系统用malloc函数申请一大块内存块，然后做切割，之后分出一块给该容器，用单项链表存储。这样的好处是避免了cookie的额外开销，减少了内存浪费。**
+
+这个东西的缺陷到内存管理里面去讲。
+
+### GCC4.9 使用的分配器：allocator(不是alloc!!!)
+
+![image-20230416105043344](D:\Typora\Images\image-20230416105043344.png)
+
+发现 allocator 是继承的父类 new_allocator
+
+![image-20230416105348361](D:\Typora\Images\image-20230416105348361.png)
+
+**发现GCC4.9使用的分配器和之前的分配器没什么区别，没有特殊设计，就是调用的malloc函数和free函数，不知道为什么(这个团队没解释)**
+
+**但是但是！GCC4.9里面的__pool_alloc就是GCC2.9里面的alloc,非常好用的那个**
+
+![image-20230416110401962](D:\Typora\Images\image-20230416110401962.png)
+
+### 3.容器之间的关系
+
+容器与容器之间的关系基本上都是复合的关系，比如set/multiset和map/multimap底层都是由rbtree红黑树实现的等等，具体见下图
+
+![image-20230416154815162](D:\Typora\Images\image-20230416154815162.png)
+
+### 3.区别size()和sizeof()
+
+以容器list为例，list.size()和sizeof(list)是没有直接的大小联系的（单项链表forward_list不存在size()方法）
+
+```c++
+//在vscode+linux g++编译器中
+    list<char> l;
+    for (int i = 0; i < 26; ++i)
+        l.push_back('a' + i);
+
+    cout << l.size() << endl;  // 26
+    cout << sizeof(l) << endl; // 24
+```
+
+l.size()指的是容器中存放的元素个数；sizeof(l)指的是需要形成list这个容器需要这个类所占的内存有多大，list类里面不仅存放了链表的指针，还有其他的成员属性来配合控制这个容器的运行.所以sizeof(l)和这个元素的个数一般没有关系。
+
+### 4.深入探索 list
+
+GCC2.9是这样写的
+
+![image-20230416160403390](D:\Typora\Images\image-20230416160403390.png)
+
+可以看出，list里面非常重要的一点设计就是**委托**设计，**即list本身的类并不是实际的双向链表，用户所能操作的这个类其实可以看作双向链表的管理类，里面有成员函数，迭代器，还有一根指向双向链表的指针，实际的双向链表结构就如上面所示,__list_node，这个才是真正的存储结构**，这也是为什么sizeof()和size()是不一样的，因为设计者很好的把二者分开了，使得用户和写代码的人都能很好的管理自己的部分。
+
+由于list的存储是不连续的，所以相应的他的迭代器也需要是智能指针，需要重载++和--运算符，(注意list的迭代器不是随机访问迭代器，所以不能使用+ -号运算符，也不能使用算法库的函数sort()，而需要使用自带的函数sort() )那么就应该是一个类了。**进而推得所有的容器(除了vector和array)的迭代器，最好都写成一个类来实现。**
+
+### list的迭代器
+
+这个迭代器最重要的就是重载 ++ 运算符，也就是前置++和后置++
+
+![image-20230416163304200](D:\Typora\Images\image-20230416163304200.png)
+
+前置++和后置++的区别就是后置++的参数列表里面会有一个占位符int来表示他是后置++
+
+```c++
+//前置++
+self& operator++(){
+    node=(link_type)((*node).next);
+    return *this;
+}
+//这里的self是指迭代器这个类，是个别名。这个实现还是比较容器理解的
+//注意返回的是迭代器新的位置所以可以返回引用类型
+```
+
+```c++
+//拷贝构造
+__list_iterator(const iterator& x):node(x.node){}
+```
+
+```c++
+//重载*
+reference operator*()const{return (*node).data;}
+```
+
+```c++
+//后置++
+self operator++(int){
+	self tmp=*this;
+    //这一步仔细看看，可能会调用拷贝构造(=)，可能也会调用*重载，但是*重载明显不符合要求
+    //再加上 = 在前面，所以调用的是拷贝构造，*this已经被看作拷贝构造的参数，拷贝出来了一个新的原位置迭代器!!!!
+	++*this;
+    //前置++
+	return tmp;
+}
+//注意由于需要返回原位置的迭代器，而现在的迭代器已经改变了，所以最好新创建一个，return by value
+```
+
+### 关于为什么后置++不能返回引用，比较有说服力的还有如下的原因：
+
+```c++
+int i=2,j=2;
+cout<< ++++i << j++++ << endl;
+```
+
+**我们尝试将i和j分别进行前置和后置++分别加两次，c++的编译器允许前置++连续加，但是不允许后置++连续加，我们知道想要连续加的条件就是要返回引用继续修改原本的值，所以既然不允许连续后置++，那么就return by value，直接创建一个新对象**
+
+然后类在重载这两个运算符的时候也会向编译器自带的规则看起，也不允许后置++连续加，所以就只能return by value
+
+### 关于 * 和 & 运算符的重载
+
+```c++
+#include <iostream>
+using namespace std;
+#include <list>
+
+class fuck
+{
+public:
+    void print() { cout << "hello" << endl; }
+    fuck(int data = 0) : _data(data) {}//构造函数，可以将int类型转化为类对象
+
+    int getData() { return this->_data; }
+
+private:
+    int _data;
+};
+
+int main()
+{
+    list<fuck> l{1, 2, 3, 6, 5, 8, 8, 9};
+    auto iter = l.begin();//取得首个元素迭代器
+    //*iter取得的是 fuck 对象,iter->取得的是 fuck对象指针
+    //对于简单的类型 iter->没什么作用，比如int，这时候*iter就代表了value，但是对于类对象那就不一样了
+    cout << (*iter).getData() << endl;
+    iter->print();
+
+    return 0;
+}
+```
+
+*和->的具体实现,Type是类的类型
+
+```c++
+typedef Type& reference;
+typedef Type* pointer;
+//* 返回的是类对象
+reference operator*(){
+    return *(this->node);//node是迭代器当中存放的链表指针对象
+}
+//-> 返回的是类对象指针
+pointer operator->(){
+    return &(operator*());
+}
+```
+
+### G4.9 和 G2.9的区别
+
+具体区别就如下图所示：
+
+![image-20230416171855901](D:\Typora\Images\image-20230416171855901.png)
+
+在4.9版本当中
+
+![image-20230416174305071](D:\Typora\Images\image-20230416174305071.png)
+
+**刻意在list尾端加上一段空白的区域来复合STL迭代器前闭后开的特征!!!但是相应的这个设计的复杂度又大大增加了。**
