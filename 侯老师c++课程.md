@@ -2074,3 +2074,873 @@ typedef value_type* iterator; // T*
 
 ![image-20230419201320469](D:\Typora\Images\image-20230419201320469.png)
 
+## 4.20
+
+### 1.深入探索 deque 和 queue , stack
+
+### deque
+
+deque 双端队列的实现结构：
+
+![image-20230420164335846](D:\Typora\Images\image-20230420164335846.png)
+
+**具体实现：将deque的存储划分为若干个等大的区域，每个区域的首元素用一个指针存放在一个vector容器中(就是图中的map数组)，当缓冲区buffer的左端或者右端不够的时候，就新开一个缓冲区放在左边和右边，存入元素，并且把该buffer的首指针存入map数组的左边或者右边。因此deque的迭代器的就分为：**
+
+**first 该缓冲区的首地址；last 该缓冲区的末尾(首闭尾开)；cur 元素的位置；node 存入map数组的指针!!!**
+
+下面看一下deque的具体源代码设计：
+
+**GCC2.9:**
+
+![image-20230420170120084](D:\Typora\Images\image-20230420170120084.png)
+
+其中第三个参数 Bufsiz 是可以人为指定缓冲区的大小
+
+![image-20230420170739434](D:\Typora\Images\image-20230420170739434.png)
+
+从这里可以看出，上面调用了一个函数，如果 BufSiz 不为0，那么就设置大小为人为指定；如果为0，则表示设置为预设的值，需要查看要存放的类型的大小，大于512就指定一个缓冲区只放这一个元素，个数设置为1；小于的话就计算出个数，计算出个数之后就可以知道缓冲区的大小了
+
+![image-20230420170150250](D:\Typora\Images\image-20230420170150250.png)
+
+这个迭代器里面也包含了五个必要类型，写的非常严谨，也有了四个需要的参数!!!
+
+**Insert函数:**
+
+![image-20230420172205138](D:\Typora\Images\image-20230420172205138.png)
+
+如果是在头部和尾部插入，那么和push_front()和push_back()没有区别
+
+如果在中间插入就调用赋值函数 insert_aux()
+
+![image-20230420172617688](D:\Typora\Images\image-20230420172617688.png)
+
+由于在中间插入必然会导致元素的拷贝过程，为了减少开销，提高效率，我们需要判断元素在deque靠近start和finish哪一端的位置，这样可以更好的去选择操作的方向
+
+**deque如何模拟连续空间操作？(操作符重载)**
+
+![image-20230420173341877](D:\Typora\Images\image-20230420173341877.png)
+
+**deque 的 - 号操作符重载**
+
+由于 deque 存储的缓冲区buffer机制，我们必须判断两个迭代器之间有多少个缓冲区buffer，然后再根据计算公式来进行计算得出两个迭代器之间元素的个数
+
+具体就是这样!
+
+**根据两个迭代器的node指针找到map数组里面两个指针距离的位置就可以知道两个中间差了多少个缓冲区buffer了，再加上本缓冲区内的距离就是两个迭代器之间的元素个数!!!**
+
+![image-20230420173832550](D:\Typora\Images\image-20230420173832550.png)
+
+**++ 和 -- 操作符重载**
+
+注意需要判断迭代器移动过程中是否超越了本缓冲区的界限移入另一个缓冲区!!!
+
+一个比较好的编码习惯就是后++调用前++；后--调用前--
+
+![image-20230420174307662](D:\Typora\Images\image-20230420174307662.png)
+
+**+= + 号操作符重载**
+
+在 += 运算符重载中，需要注意判断迭代器位置移动之后有没有超越边界，如果超越了边界，需要进行相应的边界修改
+
+![image-20230420193008988](D:\Typora\Images\image-20230420193008988.png)
+
++= 如果没有正确的缓冲区需要切换到正确的缓冲区；如果是正确的缓冲区那就很简单了
+
+**-= - 号运算符重载**
+
+用的是+=和+号的重载
+
+![image-20230420193316669](D:\Typora\Images\image-20230420193316669.png)
+
+**GCC 4.9:** 依托答辩
+
+![image-20230420193754702](D:\Typora\Images\image-20230420193754702.png)
+
+## 4.21
+
+### 1. queue
+
+**内部存了一个 deque 容器，二者形成了复合 composition 关系**
+
+queue内部的函数，deque能完全满足它，所以调用 deque 的成员函数就可以了!!!
+
+![image-20230421103130501](D:\Typora\Images\image-20230421103130501.png)
+
+**queue和stack，关于其iterator和底层容器**
+
+**stack和queue不允许遍历，也不提供iterator!!!!**
+
+因为他们的模式是先进后出和先进先出，这样的模式不允许能访问到任意位置的元素
+
+![image-20230421104600566](D:\Typora\Images\image-20230421104600566.png)
+
+**关于stack和queue的内部支撑容器，上面讲的是deque，其实也可以用list**
+
+默认提供的是deque，这个效率比较快一点
+
+![image-20230421104609426](D:\Typora\Images\image-20230421104609426.png)
+
+**stack可以用vector做底部支撑；queue不可以用vector!!!**
+
+因为vector没有 pop_front() 函数!!!
+
+![image-20230421104723249](D:\Typora\Images\image-20230421104723249.png)
+
+**关于其他的底部容器支撑，stack和queue都不可以选用set或者map做底部容器支撑，因为他们两个也没有相应的函数提供!!!**
+
+![image-20230421105352734](D:\Typora\Images\image-20230421105352734.png)
+
+关于这些底部容器支撑，如果你没有调用它不存在的函数，那其实调用还是可以的，但是总体来看是不行的!!!
+
+### 2.自己手写了一个简单的二叉树(创建二叉树函数不会)
+
+```c++
+//TreeNode.h
+#ifndef __TREENODE__
+#define __TREENODE__
+
+enum Left_Right
+{
+    Left,
+    Right
+};
+
+// 定义结点类
+#include <iostream>
+template <class Type>
+struct TreeNode
+{
+    typedef Type __ValueType;
+    typedef TreeNode<__ValueType> __NodeType;
+    typedef __NodeType *__pointer;
+
+    __ValueType val;
+    __pointer left;
+    __pointer right;
+
+    void __init__();
+    void insert(__ValueType val, bool is_left = Left); // 1为左 0为右 默认为做左
+
+    void PreOrder();
+    void InOrder();
+    void PostOrder();
+    void visit();
+};
+
+// 虽然不给节点写构造函数但是写一个初始化没问题的
+template <class Type>
+inline void TreeNode<Type>::__init__()
+{
+    this->left = nullptr;
+    this->right = nullptr;
+}
+
+// 插入子树
+template <class Type>
+inline void TreeNode<Type>::insert(__ValueType val, bool is_left)
+{
+    if (is_left == Left)
+    {
+        if (this->left)
+        {
+            cout << "leftnode has already be used." << endl;
+            return;
+        }
+        __pointer newNode = new TreeNode<__ValueType>;
+        newNode->__init__();
+        newNode->val = val;
+        this->left = newNode;
+    }
+    else
+    {
+        if (this->right)
+        {
+            cout << "rightnode has already be used." << endl;
+            return;
+        }
+        __pointer newNode = new TreeNode<__ValueType>;
+        newNode->__init__();
+        newNode->val = val;
+        this->right = newNode;
+    }
+}
+
+// visit
+template <class Type>
+inline void TreeNode<Type>::visit()
+{
+    cout << this->val << endl;
+}
+
+// 遍历
+template <class Type>
+inline void TreeNode<Type>::PreOrder()
+{
+    if (!this)
+        return;
+    visit();
+    left->PreOrder();
+    right->PreOrder();
+}
+
+template <class Type>
+inline void TreeNode<Type>::InOrder()
+{
+    if (!this)
+        return;
+    left->InOrder();
+    visit();
+    right->InOrder();
+}
+
+template <class Type>
+inline void TreeNode<Type>::PostOrder()
+{
+    if (!this)
+        return;
+    left->PostOrder();
+    right->PostOrder();
+    visit();
+}
+
+#endif
+```
+
+```c++
+//BinaryTree.h
+#ifndef __BINARTTREE__
+#define __BINARTTREE__
+#include "TreeNode.h"
+
+enum Order
+{
+    pre,
+    in,
+    post
+};
+
+// 写一个全局函数来删除二叉树
+template <typename Type>
+inline void deleteNodes(TreeNode<Type> *node)
+{
+    if (node->left)
+        deleteNodes(node->left);
+    if (node->right)
+        deleteNodes(node->right);
+    delete node;
+}
+
+// 定义整颗二叉树类
+template <class Type>
+class BinaryTree
+{
+    typedef Type __ValueType;
+    typedef TreeNode<__ValueType> __NodeType;
+    typedef __NodeType &__reference;
+    typedef __NodeType *__pointer;
+
+public:
+    // BinaryTree();
+    explicit BinaryTree(__ValueType val = NULL); // 不给默认值就是NULL
+    ~BinaryTree() { deleteTree(); }
+    void deleteTree();
+    void printTree(Order ord);
+    __reference getroot() const { return *root; }
+
+private:
+    __pointer root;
+};
+
+// 构造函数
+template <class Type>
+inline BinaryTree<Type>::BinaryTree(__ValueType val)
+{
+    root = new TreeNode<Type>;
+    root->val = val;
+    root->left = nullptr;
+    root->right = nullptr;
+}
+
+// 整棵树的析构函数
+template <class Type>
+inline void BinaryTree<Type>::deleteTree()
+{
+    deleteNodes(root);
+}
+
+// 前序遍历
+template <class Type>
+inline void BinaryTree<Type>::printTree(Order ord)
+{
+    switch (ord)
+    {
+    case pre:
+        root->PreOrder();
+        break;
+    case in:
+        root->InOrder();
+        break;
+    case post:
+        root->PostOrder();
+        break;
+    }
+}
+
+#endif
+```
+
+```c++
+//main.cpp
+#include <iostream>
+using namespace std;
+#include "BinaryTree.h"
+
+/*
+       1
+   3         2
+4    6    8
+    7        0
+*/
+namespace test
+{
+    BinaryTree<int> sample()
+    {
+        BinaryTree<int> tree(1);
+        tree.getroot().insert(3, Left);
+        // left
+        auto leftNode = tree.getroot().left;
+        leftNode->insert(4, Left);
+        leftNode->insert(6, Right);
+        auto leftNode2 = leftNode->right;
+        leftNode2->insert(7, Left);
+        // right
+        tree.getroot().insert(2, Right);
+        auto rightNode = tree.getroot().right;
+        rightNode->insert(8, Left);
+        auto rightNode2 = rightNode->left;
+        rightNode2->insert(0, Right);
+
+        return tree;
+    }
+}
+
+int main()
+{
+    auto tree = test::sample();
+
+    tree.printTree(pre); // 1 3 4 6 7 2 8 0
+    cout << endl;
+    tree.printTree(in); // 4 3 7 6 1 8 0 2
+    cout << endl;
+    tree.printTree(post); // 4 7 6 3 0 8 2 1
+
+    return 0;
+}
+```
+
+### 3 rb_Tree 红黑树
+
+红黑树是一种高度平衡的二叉搜寻树；由于它保持尽量的平衡，非常有利于search和insert的操作，并且在改变了元素的操作之后会继续保持树状态的平衡
+
+### 红黑树 rb_Tree 与二叉平衡树 AVL 的对比：
+
+![image-20230421175541816](D:\Typora\Images\image-20230421175541816.png)
+
+**为什么要有红黑树？**
+
+大多数二叉排序树 BST 的操作（查找、最大值、最小值、插入、删除等等）都是 O(h)O(h)O(h) 的时间复杂度，h 为树的高度。但是对于斜树而言（BST极端情况下出现），BST的这些操作的时间复杂度将达到  O(n) 。为了保证BST的所有操作的时间复杂度的上限为  O(logn)，就要想办法把一颗[BST树](https://www.zhihu.com/search?q=BST树&search_source=Entity&hybrid_search_source=Entity&hybrid_search_extra={"sourceType"%3A"answer"%2C"sourceId"%3A1246106121})的高度一直维持在logn，而红黑树就做到了这一点，红黑树的高度始终都维持在logn，n 为树中的顶点数目。
+
+rb_Tree和AVL相比，虽然AVL更加平衡，但是条件更加苛刻，**红黑树追求的是大致平衡。** AVL 树比红黑树更加平衡，但AVL树在插入和删除的时候也会存在大量的旋转操作。**所以涉及到频繁的插入和删除操作，切记放弃AVL树，选择性能更好的红黑树；当然，如果你的应用中涉及的插入和删除操作并不频繁，而是查找操作相对更频繁，那么就优先选择 AVL 树进行实现**
+
+![](D:\Typora\Images\image-20230421174737185.png)
+
+红黑树**提供遍历操作以及迭代器iterator**，但是这个迭代器是**只读迭代器**，因为**不能修改节点上元素的值**，如果修改了元素的值，那么会导致大小关系发生变化，整个红黑树的平衡性就发生变化了
+
+图中第三段，按理来说红黑树的元素是不能通过迭代器修改元素值的，但是这个红黑树后面是用于set和map容器的，set的key和value相等不能修改；但是map的key和value没有必然联系，排序和查找都是基于key来进行的，value可以任意修改，所以可以通过迭代器修改value，这么做做是正确的
+
+红黑树的设计当中存在两种设计 **insert_unique() 和 insert_equal()** ，表示key可以重复或者不重复，这样就可以引申出 set和 multiset，mal和 multimap
+
+### 标准库对红黑树的实现:
+
+![image-20230421182526116](D:\Typora\Images\image-20230421182526116.png)
+
+**这里标准库里面的value不是指我们理解的value值，这里的value是key和data合起来叫做value，也就是一整个节点的类型；第三个参数是说我们怎么样从这个节点value当中把重要的key拿出来!!!第四个参数是说如何根据key来进行比较，因为后续要进行排序操作!!!**
+
+在rb_tree类当中，它的设计和我的设计差不多，都是把树和节点分开的来设计，所以在树rb_tree当中只用了三个参数来向外表现
+
+```c++
+size_type node_count;//节点的数量
+link_type header;//头节点(类型是指针)
+Compare key_compare;//比较key的函数指针或者仿函数
+```
+
+**在红黑树的结构里有一个 header 节点，他的元素值为空，跟list的设计一样，前闭后开的区间!!!**
+
+这样的设计会使后面的实现方便很多
+
+![image-20230421182650170](D:\Typora\Images\image-20230421182650170.png)
+
+虽然红黑树不推荐直接使用，因为更好的做法是使用上层容器；但是可以简单的使用一下来测试我们对其的理解
+
+```c++
+rb_tree<int,int,identity<int>,less<int>,alloc>;
+//key和value类型相同，说明key和data是一个东西(否则返回的value不可 能是int类型而应该是个类)，这样的话从value中取出key就可以使用写好的identity函数对象，即你传什么给我我就给你返回什么
+```
+
+使用红黑树的测试程序:(新版本的名称有些变化)
+
+```c++
+#include <iostream>
+using namespace std;
+#include <bits/stl_tree.h>
+
+int main()
+{
+    _Rb_tree<int, int, _Identity<int>, less<int>, allocator<int>> rbtree;
+    cout << rbtree.size() << endl;  // 0
+    cout << sizeof(rbtree) << endl; // 48 跟插不插元素没关系，因为里面存的是节点指针d
+    cout << rbtree.empty() << endl; // 1
+
+    rbtree._M_insert_unique(3);
+    rbtree._M_insert_unique(8);
+    rbtree._M_insert_unique(5);
+    rbtree._M_insert_unique(9);
+    rbtree._M_insert_unique(13);
+    rbtree._M_insert_unique(3);      // unique 所以3插不进去
+    cout << rbtree.size() << endl;   // 5
+    cout << rbtree.empty() << endl;  // 0
+    cout << rbtree.count(3) << endl; // 1
+
+    rbtree._M_insert_equal(3); // equal 所以3能插进去
+    rbtree._M_insert_equal(3);
+    cout << rbtree.size() << endl;   // 7
+    cout << rbtree.empty() << endl;  // 0
+    cout << rbtree.count(3) << endl; // 3
+
+    return 0;
+}
+```
+
+### 4.基于红黑树的set和map
+
+### set/multiset
+
+由于set/multiset的key和value相同，所以没有办法通过迭代器修改元素的值，也就是修改key，error
+
+set插入元素使用 insert_unique()；multiset可以重复，使用 insert_equal()
+
+![image-20230421192116968](D:\Typora\Images\image-20230421192116968.png)
+
+注意不能修改迭代器的值，const_iterator，以下是示例代码：
+
+```c++
+#include <iostream>
+using namespace std;
+#include <set>
+#include <vector>
+
+int main()
+{
+    vector<int> v{1, 3, 5, 4, 6, 8, 8, 9};
+    for (int &val : v)
+        ++val;
+    for (int &val : v)
+        cout << val << ' ';
+    cout << endl;
+
+    //会自动排序
+    set<int, less<int>> s{3, 1, 5, 4, 6, 8, 8, 9};
+    // for (int &val : s) // 这里就会报错,因为这个的迭代器是不可以更改值的
+    //     ++val;
+    for (int val : s)
+        cout << val << ' ';
+    cout << endl;
+
+    return 0;
+}
+```
+
+### map/multimap
+
+**map没有办法通过迭代器修改key的值，但是可以用过迭代器修改value的值!!!!!**
+
+map插入元素使用 insert_unique()；multimap 可以重复，使用 insert_equal()
+
+![image-20230421194843419](D:\Typora\Images\image-20230421194843419.png)
+
+**key_type和data_type被包装成为一个pair<const Key,T>；注意这里const修饰代表key无法修改，然后value_type是真正的存放类型，然后select1st代表拿取pair里面的第一个元素!!!!**
+
+使用红黑树测试map：
+
+```c++
+#include <iostream>
+using namespace std;
+#include <bits/stl_tree.h>
+
+// 源代码这么写的，我没看懂
+template <class T>
+struct SelectFirst
+{
+    template <class Pair>
+    typename Pair::first_type &
+    operator()(Pair &x) const
+    {
+        return x.first;
+    }
+
+    // typename T::first_type &
+    // operator()(T &x) const
+    // {
+    //     return x.first;
+    // }
+};
+
+int main()
+{
+    typedef int Key_Type;
+    typedef pair<const int, char> Value_Type;
+
+    // _Rb_tree<Key_Type, Value_Type, _Select1st<Value_Type>, less<int>> rbtree;
+    _Rb_tree<Key_Type, Value_Type, SelectFirst<Value_Type>, less<int>> rbtree; // error
+    // select1st怎么写不知道
+    cout << rbtree.size() << endl;  // 0
+    cout << sizeof(rbtree) << endl; // 48 跟插不插元素没关系，因为里面存的是节点指针d
+    cout << rbtree.empty() << endl; // 1
+
+    rbtree._M_insert_unique(make_pair(3, 'a'));
+    rbtree._M_insert_unique(make_pair(8, 'b'));
+    rbtree._M_insert_unique(make_pair(5, 'c'));
+    rbtree._M_insert_unique(make_pair(9, 'd'));
+    rbtree._M_insert_unique(make_pair(13, 'e'));
+    rbtree._M_insert_unique(make_pair(3, 'f')); // unique 所以3插不进去
+    cout << rbtree.size() << endl;              // 5
+    cout << rbtree.empty() << endl;             // 0
+    cout << rbtree.count(3) << endl;            // 1
+
+    rbtree._M_insert_equal(make_pair(3, 'a')); // equal 所以3能插进去
+    rbtree._M_insert_equal(make_pair(3, 'a'));
+    cout << rbtree.size() << endl;   // 7
+    cout << rbtree.empty() << endl;  // 0
+    cout << rbtree.count(3) << endl; // 3
+
+    return 0;
+}
+```
+
+其他都没什么，其中第三个模板参数SelectFirst<>(我自己写的)不是很理解为什么这么写
+
+```c++
+template <class T>//不明白这里为什么要用两次模板并且第一次的模板参数没啥用
+struct SelectFirst
+{
+    template <class Pair>
+    typename Pair::first_type &
+    operator()(Pair &x) const
+    {
+        return x.first;
+    }
+};
+```
+
+使用map的示例代码:
+
+```c++
+#include <iostream>
+using namespace std;
+#include <map>
+
+int main()
+{
+    // 第一个参数是key(不可修改,所以进去后红黑树会自动转为const类型),第二个参数是data
+    //元素会按照key自动排序!!!
+    map<int, char, less<int>> m{make_pair(9, 'a'),
+                                make_pair(5, 'b'),
+                                make_pair(6, 'c'),
+                                make_pair(4, 'd'),
+                                make_pair(8, 'c'),
+                                make_pair(9, 'b'),
+                                make_pair(6, 'd'),
+                                make_pair(1, 'a')};
+    m[0] = 'f';
+    for (auto &val : m)
+    {
+        //key不可修改，但是data可以修改
+        cout << val.first << ' ' << m[val.first] << endl;//类似于py的字典
+        val.second++;
+        cout << val.first << ' ' << val.second << endl;
+    }
+
+    return 0;
+}
+```
+
+## 4.22
+
+### 1.map独特的 operator [ ]!!!
+
+**作用：根据key传回data。注意只有map有，因为key不为data并且key是独一无二的!!!**
+
+**如果key不存在的话，就会创建这个key并且data使用默认值!!!**(和py的字典差不多)
+
+![image-20230422140640649](D:\Typora\Images\image-20230422140640649.png)
+
+使用二分查找在有序的key当中查找目标key，如果找不到的话就进行insert操作创建一个新的key！！！
+
+### 2.hashtable 散列表
+
+哈希表的设计
+
+![image-20230422143136762](D:\Typora\Images\image-20230422143136762.png)
+
+**在有限的空间之下根据哈希函数将元素(分为key和data)的key映射成为hashcode放到对应的位置下面，key下面用一个链表将key和data串起来!!!!**
+
+**由于bucket数组存的是链表指针，这个链表如果串的元素太多了之后那么搜索效率会大大降低，这个状态就是非安全状态。程序员的经验告诉我们当所有的链表下面串的元素个数大于buckets数组的大小的时候就比较危险了。**
+
+**这个时候需要打散hashtable，增大buckets数组的size，一般是两倍左右，并且数组的size最好是质数，并且将元素按照新的hash规则重新插入链表中!!!!**
+
+总结就是：不能让hashtable下面串的链表太长，太长了需要增加buckets的size来打散哈希表重新回到安全状态。
+
+GCC下面的buckets数组的size是这么确定的：**大致都是2倍附近的质数**
+
+![image-20230422144338234](D:\Typora\Images\image-20230422144338234.png)
+
+来看看hashtable的实现：
+
+![image-20230422145128498](D:\Typora\Images\image-20230422145128498.png)
+
+Value代表key和data集合，key就是键值，HashFcn代表哈希函数，就是如何把key映射为编号hashcode，ExtractKey代表如何从value里面取出key；EqualKey代表如何判断两个key相同!!!
+
+至于是单向链表还是双向链表，这个就看不同的版本了。
+
+**参数模板里面最难的一点就是决定hashtable的hash函数，怎么样将hash的key值映射为hashcode!!!**
+
+参考系统提供的hash模板函数
+
+**注意：hash函数(一般是个仿函数)返回的值应该是一个编号，也就是 size_t**
+
+![image-20230422154019414](D:\Typora\Images\image-20230422154019414.png)
+
+定义了hash函数，然后什么也不做，后面进行一些特化的处理!!!
+
+![image-20230422154054412](D:\Typora\Images\image-20230422154054412.png)
+
+注意这里的hash函数设计，我们在将key转化为hashcode的过程中，可以任意设计hash函数使得转化成为的hashcode**尽量不重复，尽量够乱!!!**
+
+**在算出hashcode之后还要放入篮子，这个时候就很简单了，就把hashcode求篮子的size的余数就可以知道放在哪里了!!!!**(现在基本都是这么做的)
+
+![image-20230422155807393](D:\Typora\Images\image-20230422155807393.png)
+
+使用hashtable的例子：
+
+```c++
+#include <iostream>
+using namespace std;
+#include <hashtable.h>
+#include <cstring>
+
+struct eqstr
+{
+    bool operator()(const char *str1, const char *str2) const
+    {
+        return strcmp(str1, str2) == 0;
+    }
+};
+
+// 如果是自己设计就可以这么设计
+inline size_t _hash_string(const char *s)
+{
+    size_t ret = 0;
+    for (; *s != '\n'; ++s)
+        ret = 10 * ret + *s;
+    return ret;
+}
+struct fuck
+{
+    size_t operator()(const char *s) const { return _hash_string(s); }
+};
+
+
+int main()
+{
+    __gnu_cxx::hashtable<const char *, const char *,
+                         hash<const char *>, // 标准库没有提供 hash<std::string>!!!!
+                         _Identity<const char *>,
+                         eqstr> 
+                 // 不能直接放入strcmp，因为我们需要判断是否相同，返回的是true和false;而strcmp返回的是1 0 -1，接口不太一致
+        ht(50, hash<const char *>(), eqstr());// 这个东西没有默认空的构造函数，需要提供一些东西
+    // 从这里可以看出直接使用hashtable非常难用
+
+    ht.insert_unique("kiwi");
+    ht.insert_unique("plum");
+    ht.insert_unique("apple");
+    for_each(ht.begin(), ht.end(), [&](auto data)
+             { cout << data << endl; });
+
+    // cout << hash<int>()(32) << endl;
+    return 0;
+}
+```
+
+##  第四讲：算法
+
+### 3.算法概述
+
+![image-20230422162235208](D:\Typora\Images\image-20230422162235208.png)
+
+算法没有办法直接面对容器，他需要借助中间商迭代器才可以，换句话说，算法不关系容器是怎么样的，只关心容器提供给我的迭代器是怎么样的，而迭代器的设计的符号重载是普适的，这样就可以适用于大多数容器了。
+
+### 4.迭代器的五种分类：注意这五种都是类!!!
+
+![image-20230422162614061](D:\Typora\Images\image-20230422162614061.png)
+
+random_access_iterator_tag 随机访问迭代器：可以跳着访问，任意一个都可以访问(重载了+ - += -= ++ -- 运算符)
+
+bidirectional_iterator_tag 双向访问迭代器：可以往前走或者往后走，但是一次只能走一格(重载了 ++ -- 运算符)
+
+farward_iterator_tag 单向访问迭代器：只能向一个方向走，inin一次只能走一格
+
+打印一下各种容器的iterator_category
+
+![image-20230422163446874](D:\Typora\Images\image-20230422163446874.png)
+
+```c++
+#include <iostream>
+using namespace std;
+#include <array>
+#include <vector>
+#include <map>
+#include <list>
+#include <forward_list>
+#include <deque>
+#include <set>
+#include <unordered_set>
+#include <unordered_map>
+#include <bits/stream_iterator.h>
+
+// 可以只指定值不给参数
+void __display_category(random_access_iterator_tag)
+{
+    cout << "random_access_iterator" << endl;
+}
+void __display_category(bidirectional_iterator_tag)
+{
+    cout << "bidirectional_iterator" << endl;
+}
+void __display_category(forward_iterator_tag)
+{
+    cout << "forward_iterator" << endl;
+}
+void __display_category(output_iterator_tag)
+{
+    cout << "output_iterator" << endl;
+}
+void __display_category(input_iterator_tag)
+{
+    cout << "input_iterator" << endl;
+}
+
+template <typename I>
+void display_category(I iter)
+{
+    // 加上typename是为了是 I 就是迭代器类型(目前这么理解)
+    typename iterator_traits<I>::iterator_category cagy; // 去问萃取剂这个迭代器是什么类型
+    __display_category(cagy);
+}
+
+int main()
+{
+    display_category(array<int, 10>::iterator());
+    display_category(vector<int>::iterator());
+    display_category(list<int>::iterator());
+    display_category(forward_list<int>::iterator());
+    display_category(deque<int>::iterator());
+
+    display_category(set<int>::iterator());
+    display_category(map<int, int>::iterator());
+    display_category(multiset<int>::iterator());
+    display_category(multimap<int, int>::iterator());
+    display_category(unordered_set<int>::iterator());
+    display_category(unordered_map<int, int>::iterator());
+    display_category(unordered_multiset<int>::iterator());
+    display_category(unordered_multimap<int, int>::iterator());
+
+    // 这两个不太一样，是从适配器adapter产生的
+    display_category(istream_iterator<int>());
+    display_category(ostream_iterator<int>(cout, ""));
+
+    return 0;
+}
+```
+
+### 5.iterator_category对算法的效率影响
+
+不同的迭代器类型会导致在访问的过程中效率有区别
+
+![image-20230422171334117](D:\Typora\Images\image-20230422171334117.png)
+
+**注意对右边代码的解读，这个distance函数是找两个迭代器之间的距离(ptrdiff_t 类型)，然后就问萃取机迭代器的类型是什么？然后针对函数调不同的重载函数就可以了!!!**
+
+```c++
+#include <iostream>
+using namespace std;
+#include <vector>
+#include <list>
+
+template <typename Iterator, typename Distance>
+inline Iterator &_advance(Iterator &iter, Distance n, std::random_access_iterator_tag)
+    {
+        iter += n;
+        return iter;
+    }
+
+template <typename Iterator, typename Distance>
+inline Iterator &_advance(Iterator &iter, Distance n, std::bidirectional_iterator_tag)
+    {
+        if (n >= 0)
+            while (n--)
+                ++iter;
+        else
+            while (n++)
+                --iter;
+        return iter;
+    }
+
+template <typename Iterator, typename Distance>
+inline Iterator &_advance(Iterator &iter, Distance n, std::input_iterator_tag)
+    {
+        while (n--)
+            ++iter;
+        return iter;
+    }
+
+template <typename Iterator, typename Distance>
+inline Iterator Advance(Iterator iter, Distance n)
+    // 这里最好不传入引用类型，因为第一下面没有更改iter的值，不用担心实参形参的问题；
+    // 第二，外部可能传入的是begin()和end()这类没有办法直接修改的迭代器
+    // 我们在使用的时候都是声明了一个运动迭代器，他的初值是begin(),这样来操作的
+    // 所以传入引用会出问题，最好传值，但是后面就可以传入引用了，因为我们是创建了一个新的迭代器对象
+    {
+        typedef typename std::iterator_traits<Iterator>::iterator_category Iterator_Category;
+        return _advance(iter, n, Iterator_Category());
+    }
+
+int main()
+{
+    vector<int> v{3, 5, 6, 7};
+    cout << *myadvance().Advance(v.begin() + 2, -1) << endl; // 5
+    list<int> l{3, 5, 6, 7, 12};
+    cout << *myadvance().Advance(l.begin(), 4) << endl; // 12
+
+    return 0;
+}
+```
+
+注意注释的内容，为什么这里该传引用，这里不该传引用!!!
+
+**从这里我们可以看出，迭代器类型的不同会导致算法效率的不同，但是我们不是通过模板特化来实现的，是通过函数重载来实现的!!!**
+
+**算法源码对 iterator_category 的暗示:**
+
+![image-20230422183037284](D:\Typora\Images\image-20230422183037284.png)
+
+因为上面的迭代器都是模板，但是有些算法在实现的过程中只对某种类型的迭代器有效，所以设计者会暗示迭代器的类型来方便阅读和修改!!!
