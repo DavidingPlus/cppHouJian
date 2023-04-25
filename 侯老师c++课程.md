@@ -2944,3 +2944,754 @@ int main()
 ![image-20230422183037284](D:\Typora\Images\image-20230422183037284.png)
 
 因为上面的迭代器都是模板，但是有些算法在实现的过程中只对某种类型的迭代器有效，所以设计者会暗示迭代器的类型来方便阅读和修改!!!
+
+## 4.23
+
+### 1.算法源代码剖析
+
+C++ STL 库里面的标准算法格式
+
+```c++
+template <typename Iterator>
+std::Algorithm(Iterator iter1,Iterator iter2){
+    ...
+}
+
+//带比较的参数 一般是仿函数
+template <typename Iterator,typename Cmp>
+std::Algorithm(Iterator iter1,Iterator iter2,Cmp cmp){
+    ...
+}
+```
+
+### accumulate
+
+遍历整个容器对每个元素进行操作(可以是累加)然后返回值
+
+![image-20230423113446373](D:\Typora\Images\image-20230423113446373.png)
+
+测试accumulate：
+
+```c++
+int myfunc(int x, int y)
+{
+    return x + 2 * y;
+}
+
+struct myclass
+{
+    int operator()(int x, int y) const { return x + 3 * y; }
+} myobj;
+
+void test_accumulate()
+{
+    cout << "test_accumulate().........." << endl;
+    int init = 100;
+    int nums[] = {10, 20, 30};
+
+    cout << "using default accumulate: ";
+    cout << accumulate(nums, nums + 3, init); // 160
+    cout << '\n';
+
+    cout << "using functional's minus: ";
+    // minus 减法 仿函数
+    cout << accumulate(nums, nums + 3, init, minus<int>()); // 40
+    cout << '\n';
+
+    cout << "using custom function: ";
+    cout << accumulate(nums, nums + 3, init, myfunc); // 220
+    cout << '\n';
+
+    cout << "using custom object: ";
+    cout << accumulate(nums, nums + 3, init, myobj); // 280
+    cout << '\n';
+}
+```
+
+自己实现以下accumulate:
+
+```c++
+#include <iostream>
+using namespace std;
+#include <vector>
+#include <list>
+#include <bits/stl_numeric.h> //accumulate
+#include <string>
+
+struct Sum_Square
+{
+    template <class Value_Int>
+    inline Value_Int &operator()(Value_Int &val, Value_Int val_iter)
+    {
+        val += val_iter * val_iter;
+        return val;
+    }
+};
+
+struct String_Append
+{
+    template <class Value_String>
+    inline Value_String &operator()(Value_String &val, Value_String val_iter)
+    {
+        val_iter.append(" ");
+        val.append(val_iter);
+        return val;
+    }
+};
+
+struct Algorithm
+{
+    template <class Iterator, class Value_Type>
+    inline static Value_Type Accumulate(Iterator begin, Iterator end, Value_Type val)
+    {
+        for (; begin != end; ++begin)
+            val += *begin;
+        return val;
+    }
+
+    template <class Iterator, class Value_Type, class Binary_Operation>
+    inline static Value_Type Accumulate(Iterator begin, Iterator end, Value_Type val, Binary_Operation binary_op)
+    {
+        for (; begin != end; ++begin)
+            val = binary_op(val, *begin);
+        return val;
+    }
+};
+
+int main()
+{
+    vector<int> v{5, 3, 6, 9, 10};
+    cout << Algorithm::Accumulate(v.begin(), v.end(), 0 << endl; // 33
+    cout << Algorithm::Accumulate(v.begin(), v.end(), 0, Sum_Square()) << endl; // 251
+    list<string> l{"hello", "I", "want", "to", "fuck", "you", "my", "friend."};
+    cout << Algorithm::Accumulate(l.begin(), l.end(), string(), String_Append()) << endl;
+
+    return 0;
+}
+```
+
+### for_each
+
+容器的遍历算法
+
+![image-20230423171745364](D:\Typora\Images\image-20230423171745364.png)
+
+自己实现一下for_each
+
+```c++
+#include <iostream>
+using namespace std;
+#include <vector>
+#include <algorithm>
+
+struct Algorithm
+{
+    template <class Iterator, class Function>
+    //为什么要返回 Function 仿函数呢?(或者函数指针)
+    inline static Function For_each(Iterator first, Iterator last, Function f)
+    {
+        for (; first != last; ++first)
+            f(*first); // 注意是直接把数据传递给函数 f
+        return f;
+    }
+};
+
+int main()
+{
+    vector<int> v1{2, 5, 3, 6, 9};
+    vector<int> v2;
+
+    // 不修改v1的值
+    Algorithm::For_each(v1.begin(), v1.end(), [&](int val)
+                        { val*=2;v2.push_back(val); });
+
+    for_each(v1.begin(), v1.end(), [&](auto val)
+             { cout << val << ' '; });
+    cout << endl;
+
+    for (auto val : v2)
+        cout << val << ' ';
+    cout << endl;
+
+    return 0;
+}
+```
+
+看到for_each的返回值，我不得不思考为什么要返回Function仿函数呢？(很少情况下函数指针)
+
+**原因是：可以监视仿函数对象在经过这个for_each操作之后的状态**
+
+```c++
+#include <iostream>
+#include <vector>
+#include <algorithm>
+using namespace std;
+
+/*
+    for_each()它可以返回其仿函数(返回所传入的函数对象的最终状态).
+    这样我们就可以通过for_each()的返回值来获取仿函数的状态.
+*/
+
+/* 仿函数 */
+class CSum
+{
+public:
+    CSum() { m_sum = 0; }
+
+    void operator()(int n) { m_sum += n; }
+
+    int GetSum() const { return m_sum; }
+
+private:
+    int m_sum;
+} cs;
+
+int main()
+{
+    vector<int> vi;
+    for (int i = 1; i <= 100; i++)
+        vi.push_back(i);
+    // 通过for_each返回值访问其最终状态(返回所传入的函数对象的最终状态).
+    cs = for_each(vi.begin(), vi.end(), cs); // 返回的是一个新创建的对象，未返回引用，不会修改实参
+    cout << cs.GetSum() << endl;
+
+    return 0;
+}
+```
+
+### replace,replace_if,replace_copy,replace_copy_if
+
+```c++
+#include <iostream>
+using namespace std;
+#include <vector>
+#include <algorithm>
+
+template <typename Container>
+void print(Container con)
+{
+    for (auto val : con)
+        cout << val << ' ';
+    cout << endl;
+}
+
+struct Algorithm
+{
+    template <class Iterator, class Value_Type>
+    inline static void Replace(Iterator first, Iterator last, const Value_Type oldval, const Value_Type newval)
+    {
+        for (; first != last; ++first)
+            if (*first == oldval)
+                *first = newval;
+    }
+
+    template <class Iterator, class Value_Type, class Predicate>
+    // 给一个谓词来判断条件是否更改
+    inline static void Replace_if(Iterator first, Iterator last, Predicate pred, const Value_Type newval)
+    {
+        for (; first != last; ++first)
+            if (pred(*first))//这里谓词传递的参数只有一个值
+                *first = newval;
+    }
+
+    // 上面的算法当中传入的参数只有一个值，没传入如果需要比较的基准值
+    template <class Value_Type>
+    bool operator()(const Value_Type &val)
+    {
+        return val > 5;//我们肯定不想在内部手动更改这个5，而是想在外面写代码的时候把5写进去
+    }
+    // 为了解决这个问题需要引用仿函数适配器 functor adapter
+    // 标准库提供的 bind2nd() 用法 bind2nd(greater<int>,val)
+};
+
+int main()
+{
+    vector<int> v{1, 1, 1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    print(v);
+
+    Algorithm::Replace(v.begin(), v.end(), 1, 66);
+    print(v);
+
+    vector<int> v2{1, 1, 1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    Algorithm::Replace_if(v2.begin(), v2.end(), bind2nd(greater<int>(), 5), 666);
+    print(v2);
+
+    vector<int> v3;
+    v3.resize(v.size()); // 注意这里要给v3预分配空间，不然会段错误
+    replace_copy(v.begin(), v.end(), v3.begin(), 10, 50);
+    print(v3);
+
+    return 0;
+}
+```
+
+### count,count_if
+
+这个差不多就不写了
+
+![image-20230423175336384](D:\Typora\Images\image-20230423175336384.png)
+
+为什么要返回difference_type呢？
+
+算法通过萃取机询问迭代器，迭代器之间的间距类型怎么表示，这个类型就是difference_type
+
+标准库的定义是 ptrdiff_t，也就是 long long，这下就可以理解了
+
+有些容器自带的成员函数，比如图中的，这些函数的执行效率肯定比全局的执行效率更高!!!
+
+### find,find_if
+
+循序式查找，效率并不是很高，找不到返回last迭代器
+
+![image-20230423202430305](D:\Typora\Images\image-20230423202430305.png)
+
+### sort
+
+```c++
+#include <iostream>
+using namespace std;
+#include <vector>
+#include <array>
+#include <algorithm>
+
+template <typename Container>
+void print(Container con)
+{
+    for (auto val : con)
+        cout << val << ' ';
+    cout << endl;
+}
+
+bool myfunc(int i, int j)
+{
+    return i < j;
+}
+
+struct myclass
+{
+    bool operator()(int i, int j) { return i < j; }
+} myobj;
+
+int main()
+{
+    array<int, 8> arr = {32, 71, 12, 45, 26, 80, 53, 33};
+    vector<int> v(arr.begin(), arr.end());
+    print(v);
+
+    // using default comparison (operator <)
+    sort(v.begin(), v.begin() + 4); // 排序前四个 12 32 45 71 26 80 53 33
+    print(v);
+
+    // using function as comp
+    sort(v.begin() + 4, v.end(), myfunc); // 12 32 45 71 26 33 53 80
+    print(v);
+
+    // using object as comp
+    sort(v.begin(), v.end(), myobj); // 12 26 32 33 45 53 71 80
+    print(v);
+
+    // reverse iterators
+    sort(v.rbegin(), v.rend(), less<int>()); // 80 71 53 45 33 32 26 12
+    print(v);
+
+    return 0;
+}
+```
+
+![image-20230423203719337](D:\Typora\Images\image-20230423203719337.png)
+
+**注意一点的是stl标准库里面的 sort 函数要求的是 random_access_iterator_tag!!!!!**
+
+**所以list和forward_list没办法调用，只能调用他们自己的类函数sort!!!**
+
+### binary_search(通过二分查找确定元素在不在容器当中)
+
+**二分查找一定只能适用于一个有序序列!!!!并且在库函数当中只能用于升序序列!!!!**
+
+![image-20230423210411376](D:\Typora\Images\image-20230423210411376.png)
+
+使用例子：
+
+```c++
+#include <iostream>
+using namespace std;
+#include <algorithm>
+#include <vector>
+
+template <typename Container>
+void Sort(Container &con) // 传引用，不然不改变实参
+{
+    sort(con.begin(), con.end());
+}
+
+template <typename Container>
+void rSort(Container &con) // 传引用，不然不改变实参
+{
+    sort(con.rbegin(), con.rend());
+}
+
+template <typename Container>
+void print(Container &con) // 传引用，不然不改变实参
+{
+    for (auto val : con)
+        cout << val << ' ';
+    cout << endl;
+}
+
+namespace Fuck
+{
+    template <typename Random_Iterator, typename Value_Type>
+    bool __Binary_Search(Random_Iterator first, Random_Iterator last, const Value_Type &val,
+                         random_access_iterator_tag)
+    {
+        // 先做一个检查 val比 *first大 那么找不到
+        if (val < *first)
+            return false;
+
+        while (first != last)
+        {
+            Random_Iterator mid = first + (last - first) / 2; // 没有两个迭代器相加的重载版本!!!!
+            if (*mid > val)
+                last = mid; // 注意last要满足前闭后开
+            else if (*mid < val)
+                first = ++mid;
+            else
+                return true;
+        }
+        return false;
+    }
+
+    template <typename Random_Iterator, typename Value_Type>
+    bool __Binary_Search(Random_Iterator first, Random_Iterator last, const Value_Type &val,
+                         random_access_iterator_tag, int) // 多一个int代表降序
+    {
+        // 先做一个检查 val比 *first大 那么找不到
+        if (val > *first)
+            return false;
+
+        while (first != last)
+        {
+            Random_Iterator mid = first + (last - first) / 2; // 没有两个迭代器相加的重载版本!!!!
+            if (*mid > val)
+                first = ++mid;
+            else if (*mid < val)
+                last = mid; // 注意last要满足前闭后开
+            else
+                return true;
+        }
+        return false;
+    }
+
+    template <typename Iterator, typename Value_Type>
+    // 写了一个random_access_iterator的重载
+    bool Binary_Search(Iterator first, Iterator last, const Value_Type &val)
+    {
+        // 想办法让其可以适用于降序序列
+        typedef typename iterator_traits<Iterator>::iterator_category Iterator_Category;
+        if (*first < *(last - 1)) // 升序 保持前闭后开的规则!!!
+            return __Binary_Search(first, last, val, Iterator_Category());
+        else
+            return __Binary_Search(first, last, val, Iterator_Category(), true);
+    }
+}
+
+int main()
+{
+    vector<int> v{1, 3, 6, 8, 7, 9, 2, 0};
+
+    Sort(v); // 0 1 2 3 6 7 8 9
+    print(v);
+    cout << Fuck::Binary_Search(v.begin(), v.end(), 2) << endl;
+    // cout << binary_search(v.begin(), v.end(), 5) << endl;
+    rSort(v);
+    print(v);
+    cout << Fuck::Binary_Search(v.begin(), v.end(), 2) << endl;
+
+    return 0;
+}
+```
+
+## 4.24
+
+## 第五讲：仿函数 适配器
+
+### 1.仿函数 functors(注意要继承)
+
+标准库提供的三大类型的仿函数：算术类 逻辑运算类 相对运算类
+
+![image-20230424161751257](D:\Typora\Images\image-20230424161751257.png)
+
+还有之前提到过的几个仿函数：
+
+![image-20230424162149742](D:\Typora\Images\image-20230424162149742.png)
+
+标准库的示范：
+
+![image-20230424162843434](D:\Typora\Images\image-20230424162843434.png)
+
+**注意到一点：标准库提供的functors都存在继承关系!!!!只有这样才算是真正融入了STL体系，这样才能更好的运作。**
+
+**仿函数的 adaptable可适配 条件**
+
+![image-20230424163242826](D:\Typora\Images\image-20230424163242826.png)
+
+**STL规定，每个Functor都应该挑选适当的类来继承，因为适配器adapter会提出一些问题!!!!**
+
+**什么叫adaptable?如果你希望自己的仿函数是可以被适配器调整的话，那么就继承一个适当的类，这样可以完成更多的操作!!!为什么要继承呢？因为可能在被adapter改造的时候可能会问这些问题。这也和算法问迭代器的五个问题一样，那里是通过迭代器的萃取机 Iterator Traits (也叫迭代器适配器 Iterator Adapters )去问的，这里同理通过继承的关系去回答adapter的问题!!!**
+
+### 2.适配器 Adapter
+
+存在多种 Adapters ，还是那张图，注意关系
+
+<img src="D:\Typora\Images\image-20230424170726596.png" alt="image-20230424170726596" style="zoom:67%;" />
+
+Adapter的关键是：
+
+**这个Adapter要去改造某个东西(比如图中的container，functor，iterator)，这里就有两种解决方式，第一种是继承的方式，就是Adapter继承这个东西，拥有这个东西的属性来进行改造；第二种是内含的方式，Adapter内部有这个东西来进行改造!!!!**
+
+**在标准库里面的实现绝大多数都是内含的方式!!!**
+
+一下就是一些适配器的例子：
+
+### 容器适配器：stack,queue
+
+![image-20230424172134280](D:\Typora\Images\image-20230424172134280.png)
+
+这个之前用过很多次了，就是把默认的容器拿进来进行改造，比如这里给的默认值是 deque ，改造之后能够以一种全新的面貌展现给用户，能够更加准确的针对用户的需要来进行相应的操作。
+
+## 4.25
+
+### 函数适配器：binder2nd
+
+![image-20230425185823723](D:\Typora\Images\image-20230425185823723.png)
+
+```c++
+#include <iostream>
+using namespace std;
+#include <vector>
+#include <algorithm>
+
+namespace fuck
+{
+    // 自己写一个bind2nd和binder2nd
+    // 仔细敲打一下这段代码
+    // 这里暗示了需要传入的是一个二元运算符 然后下面的类型名称是继承里面写好的类型名称
+    template <class Binary_Op>
+    class _BinderSecond
+    // 不继承这一行也可以运作，但是没办法进行后续的改造
+    // 这里就不继承了!!!
+    // : public unary_function<typename Binary_Op::first_argument_type, typename Binary_Op::second_argument_type>
+    {
+    protected:
+        Binary_Op op;
+        typename Binary_Op::second_argument_type value; // 第二参数 需要设定的固定值
+    public:
+        // ctor
+        _BinderSecond(const Binary_Op &x, const typename Binary_Op::second_argument_type &y)
+            : op(x), value(y) {}
+
+        typename Binary_Op::result_type
+        operator()(const typename Binary_Op::first_argument_type &x)
+        {
+            return op(x, value);
+        }
+    };
+
+    template <class Binary_Op, class Value_Type>
+    inline _BinderSecond<Binary_Op> _BindSecond(const Binary_Op &op, const Value_Type &val)
+    {
+        typedef typename Binary_Op::second_argument_type second_type;//这句话就是adapter在问问题
+        return _BinderSecond(op, second_type(val));
+    };
+}
+
+int main()
+{
+
+    vector<int> v{1, 3, 2, 5, 9, 8, 7, 6, 4, 10};
+    cout << count_if(v.begin(), v.end(),
+                     fuck::_BindSecond(less<int>(), 5)) // 绑定第二参数
+         << endl;
+
+    return 0;
+}
+```
+
+注意其中的一些代码：
+
+```c++
+typename Binary_Op::second_argument_type value;
+```
+
+**为什么要加上 typename ，是为了通过编译，因为这个时候我们不知道Binary_Op是什么类型，然后如果他是我们想要的，也就是其中含有这个类型定义，那么就能通过编译，否则在这里就会报错!!!!**
+
+**仿函数functors的可适配(adaptable)条件**
+
+继承(因为adapter会问问题，提问类型)，是一个functor
+
+![image-20230425191652925](D:\Typora\Images\image-20230425191652925.png)
+
+### 函数适配器：not1
+
+![image-20230425194548756](D:\Typora\Images\image-20230425194548756.png)
+
+```c++
+#include <iostream>
+using namespace std;
+#include <vector>
+#include <algorithm>
+
+namespace fuck
+{
+    // 对谓词做否定
+    template <class Predicate>
+    class _unary_negate
+        // 继承为了后续的改造
+        : public unary_function<typename Predicate::argument_type, bool>
+    {
+    protected:
+        Predicate pred;
+
+    public:
+        // ctor
+        _unary_negate(const Predicate &x) : pred(x) {}
+        
+        bool operator()(const typename Predicate::argument_type &x) const
+        {
+            return !pred(x);
+        }
+    };
+
+    template <class Predicate>
+    inline _unary_negate<Predicate> _Not1(const Predicate &pred)
+    {
+        return _unary_negate<Predicate>(pred);
+    }
+}
+
+int main()
+{
+    vector<int> v{1, 3, 2, 5, 9, 8, 7, 6, 4, 10};
+    cout << count_if(v.begin(), v.end(),
+                     fuck::_Not1(bind2nd(less<int>(), 5))) // 绑定第二参数
+         << endl;
+
+    return 0;
+}
+```
+
+**观察发现这些adapter的实现方法基本都是一个模板辅助函数，调用一个模板类，这个类里面有构造函数和小括号重载!!!!**
+
+### 新型适配器：bind(since c++11)
+
+右边是老版本，左边是新版本!!!
+
+![image-20230425194051698](D:\Typora\Images\image-20230425194051698.png)
+
+可见bind的实现是非常复杂的!!!!
+
+下面是对bind的一些测试：
+
+![image-20230425200558918](D:\Typora\Images\image-20230425200558918.png)
+
+**bind 可以绑定：**
+
+**functions函数；function objects 函数对象(仿函数)；**
+
+**member functions 成员函数；data members 成员属性**
+
+前两个比较好理解，其中第三个和第四个的绑定规则是：
+
+**注意第一个参数传入的是传的是地址!!!!**
+
+**member functions, _1;**
+
+**data members,_1**
+
+**必须有第二个参数，第二个参数必须是必须是某个object的地址，可以是一个占位符，在调用的时候被外界指定!!!**
+
+**第一个参数可以理解为调用类里面的什么接口，第二个参数可以理解为谁来调用!!!!**
+
+使用例子：
+
+```c++
+#include <iostream>
+using namespace std;
+#include <functional>
+using namespace std::placeholders; // 使用占位符 _1 _2 _3这些
+#include <vector>
+#include <algorithm>
+
+double my_divide(double x, double y)
+{
+    return x / y;
+}
+
+struct MyPair
+{
+    double a, b;
+    double multiply() { return a * b; }
+};
+
+void Bind_Functions()
+{
+    // binding functions
+    auto fn_five = bind(my_divide, 10, 2); // return 10.0/2.0
+    cout << fn_five() << endl;             // 5
+
+    auto fn_half = bind(my_divide, _1, 2); // return x/2.0
+    cout << fn_half(10) << endl;           // 5
+
+    auto fn_rounding = bind(my_divide, _2, _1); // 第一参数为除数，第二参数为被除数 return y/x
+    cout << fn_rounding(10, 2) << endl;         // 0.2
+
+    auto fn_invert = bind<int>(my_divide, _1, _2); // int 代表希望返回的类型 return int(x/y)
+    cout << fn_invert(10, 3) << endl;              // 3
+}
+
+void Bind_Members()
+{
+    MyPair ten_two{10, 2};
+
+    auto bound_memfn = bind(&MyPair::multiply, _1); // return x.multiply()
+    cout << bound_memfn(ten_two) << endl;           // 20
+
+    auto bound_memdata = bind(&MyPair::a, ten_two); // return tentwo.a
+    cout << bound_memdata() << endl;                // 10
+
+    auto bound_memdata2 = bind(&MyPair::b, _1); // return x.b
+    cout << bound_memdata2(ten_two) << endl;    // 2
+
+    vector<int> v{1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    auto _fn = bind(less<int>(), _1, 5);
+    cout << count_if(v.cbegin(), v.cend(), _fn) << endl;
+    cout << count_if(v.begin(), v.end(), bind(less<int>(), _1, 5)) << endl;
+}
+
+int main()
+{
+    Bind_Functions();
+    Bind_Members();
+
+    return 0;
+}
+```
+
+### 迭代器适配器：rbegin，rend
+
+![image-20230425203641882](D:\Typora\Images\image-20230425203641882.png)
+
+这个迭代器就是在正向迭代器的基础之上进行改造的迭代器!!!
+
+### 迭代器适配器：inserter(没弄懂)
+
+![image-20230425205345712](D:\Typora\Images\image-20230425205345712.png)
+
+注意copy是已经写死的函数，那么如何才能改变他的行为呢？
+
+**答案是借助操作符重载，本例子就是重载了 = 号运算符就是实现了由赋值操作变为插入操作了!!!!**
+
+## 第六讲：STL周围的细碎知识点
+
+### 1.一个万用的 hash function
+
