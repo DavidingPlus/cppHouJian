@@ -3691,7 +3691,821 @@ int main()
 
 **答案是借助操作符重载，本例子就是重载了 = 号运算符就是实现了由赋值操作变为插入操作了!!!!**
 
+## 4.26
+
 ## 第六讲：STL周围的细碎知识点
 
 ### 1.一个万用的 hash function
+
+![image-20230426151146418](D:\Typora\Images\image-20230426151146418.png)
+
+**系统提供了一个非常不错的hashcode生成函数 hash_val() ，括号里面把元素的所有参数全部放进去就好！**
+
+### hash_val(参数包)
+
+```c++
+    // 1
+	template <typename... Types> // ... 的含义 接受任意数量的模板参数
+    inline size_t hash_val(const Types &...args)
+	//创建一个种子，将种子和参数包绑定在一起
+    {
+        size_t seed = 0;
+        hash_val(seed, args...);//调用2号重载 修改seed
+        return seed;//最后返回seed就是最终的hashcode
+    }
+
+	// 2
+    template <typename Type, typename... Types>
+    inline void hash_val(size_t &seed, const Type &val, const Types &...args)
+    {
+        //注意这个函数接受的参数，有一个val,本来传入的是n个元素的参数包，出现val之后，就将其分开，分为1和n-1来处理
+        hash_combine(seed, val);//取出一个参数来对seed进行修改!!!!
+        hash_val(seed, args...);//处理剩余 n-1 个参数包 递归操作
+    }
+
+	// 3
+    template <typename Type>
+    inline void hash_val(size_t &seed, const Type &val)
+	//最终当只剩下一个参数的时候就最后更改一次就行了
+    {
+        hash_combine(seed, val);
+    }
+
+    template <typename Type>
+    inline void hash_combine(size_t &seed, const Type &val)
+    {
+        seed ^= std::hash<Type>()(val) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        //前面第一个参数是调用系统提供的哈希函数，后面这些加和左移右移是为了让其更加混乱，没有规律可言
+    }
+```
+
+上面的例子不是很好理解，这里写一个打印string的例子方便加深理解：
+
+```c++
+#include <iostream>
+using namespace std;
+#include <string>
+
+class StringPrint
+{
+public:
+    inline void myprint(const string &str)
+    {
+        _myprint(str);
+        cout << endl;
+    }
+
+    template <typename... Types>
+    inline void myprint(const string &str, const Types &...args)
+    {
+        _myprint(str, args...);
+        cout << endl;
+    }
+
+    template <typename... Types>
+    void foo(const Types &...args)
+    {
+        //当我们想要知道包中有多少元素时，可以使用sizeof...运算符，该运算符返回一个常量表达式，并且不会对其实参求值
+        cout << sizeof...(Types) << endl; // 类型参数数目
+        cout << sizeof...(args) << endl;  // 函数参数数目
+    }
+
+private:
+    inline void _myprint(const string &str)
+    {
+        cout << str;
+    }
+
+    // 接受参数包，参数包是占位符的替换
+    template <typename Type, typename... Types>
+    inline void _myprint(const string &str, const Type &val, const Types &...args)
+    {
+        // 一个字符一个字符的读，直到碰到占位符 %
+        for (auto iter = str.begin(); iter != str.end(); ++iter)
+        {
+            if (*iter != '%')
+                cout << *iter;
+            else
+            {
+                // 是占位符
+                cout << val;
+                string newstr = string(++iter, str.end());
+                _myprint(newstr, args...);//创建新的字符串并且传进去进行递归，注意不要忘了 return 递归出口
+                return;
+            }
+        }
+    }
+} myPrint;
+
+int main()
+{
+    myPrint.myprint("Hello , I'm % , % years old.", "David", 20);
+    myPrint.foo("Hello , I'm % , % years old.", "David", 20);
+    myPrint.myprint("fuck you!");
+    myPrint.foo("fuck you!");
+
+    return 0;
+}
+```
+
+### Hash函数的三种形式
+
+1.仿函数 functor
+
+2.函数指针
+
+```c++
+//仿函数
+class CustomerHash
+{
+public:
+    size_t operator()(const Customer &c) const
+    {
+        return HashFunction().hash_val(c.fname, c.lname, c.no);
+    }
+};
+
+//函数指针
+size_t customer_hash_func(const Customer &c)
+{
+    // 第一种思路就是这个类里面简单类型的hashcode全部相加
+    // 但是这么做的话设计者认为比较天真，没办法达到非常乱的结构
+    return HashFunction().hash_val(c.fname, c.lname, c.no);
+}
+
+//注意在main函数创建的时候传入参数的时候需要注意
+int main(){
+    unordered_set<Customer, CustomerHash> custset;
+
+    using function_pointer = size_t (*)(const Customer &); // 定义函数指针
+    unordered_set<Customer, function_pointer> custset2; //传入的是函数指针的形式!!!
+    
+    return 0;
+}
+```
+
+3.特化的版本
+
+对于 unorder_set or unorder_map，如果不给hash函数，那么默认会使用系统的 hash<value_type>，这个时候可以通过这个对其进行特化处理
+
+```c++
+// 放在std内表示在标准库std里面进行操作修改
+namespace std
+{
+    template <>
+    class hash<Customer>
+    {
+        size_t operator()(const Customer &c)
+        {
+            return HashFunction().hash_val(c.fname, c.lname, c.no);
+        }
+    };
+}
+```
+
+可以在我们的代码中对std里面的系统提供的hash函数进行特化版本的处理来实现
+
+## 4.27
+
+### 1.tuple
+
+tuple是c++11新引入的一个好东西，他可以传入一个参数包，参数包里面可以放入任意大小，任意类型
+
+![image-20230427111200767](D:\Typora\Images\image-20230427111200767.png)
+
+示例代码:
+
+```c++
+#include <iostream>
+using namespace std;
+#include <string>
+#include <tuple>
+#include <complex>
+#include <typeinfo>
+#include "29_tuple_print.h"
+
+void test()
+{
+    cout << "string,sizeof = " << sizeof(string) << endl;                   // 32
+    cout << "double,sizeof = " << sizeof(double) << endl;                   // 8
+    cout << "float,sizeof = " << sizeof(float) << endl;                     // 4
+    cout << "int,sizeof = " << sizeof(int) << endl;                         // 4
+    cout << "complex<double>,sizeof = " << sizeof(complex<double>) << endl; // 16
+
+    tuple<string, int, int, complex<double>> t;
+    cout << "tuple<string,int,int,complex<double>,sizeof = " << sizeof(t) << endl; // 56
+
+    tuple<int, float, string> t1(41, 6.3, "nico");
+    cout << "tuple<int,float,string>,sizeof = " << sizeof(t1) << endl;              // 40
+    cout << "t1: " << get<0>(t1) << ' ' << get<1>(t1) << ' ' << get<2>(t1) << endl; // 取出其中的元素用法
+
+    auto t2 = make_tuple(22, 44.0, "stacy");
+    get<1>(t1) = get<1>(t2);
+    cout << "t1: " << get<0>(t1) << ' ' << get<1>(t1) << ' ' << get<2>(t1) << endl;
+    cout << "t2: " << get<0>(t2) << ' ' << get<1>(t2) << ' ' << get<2>(t2) << endl;
+
+    // 比较大小
+    if (t1 < t2)
+        cout << "t1 < t2" << endl;
+    else if (t1 > t2)
+        cout << "t1 > t2" << endl;
+    else
+        cout << "t1 == t2" << endl;
+    t1 = t2; // 赋值操作
+    cout << t2 << endl;
+
+    typedef tuple<int, float, string> TupleType;
+    cout << tuple_size<TupleType>::value << endl; // 3
+
+    typedef tuple_element<1, TupleType>::type Type1; // float
+    cout << typeid(Type1).name() << endl;            // f
+
+    tuple<int, float, string> t3(77, 1.1, "more light");
+    int i1;
+    float f1;
+    string s1;
+    tie(i1, f1, s1) = t3; // 将这t3的三个属性绑定到这三个变量上面
+    cout << "i1 = " << i1 << " f1 = " << f1 << " s1= " << s1 << endl;
+}
+
+int main()
+{
+    test();
+
+    return 0;
+}
+```
+
+**这里面就有学问了，重载 这个参数包的 左移运算符(代码建议重复看!!!!)**
+
+```c++
+#ifndef __TUPLEPRINT__
+#define __TUPLEPRINT__
+
+#include <iostream>
+using namespace std;
+
+// get<> 尖括号里面不能放入变量，只能放入一个常量!!!!
+template <typename Tuple, size_t N>
+struct tuple_print
+{
+    inline static void print(const Tuple &t, ostream &out)
+    {
+        tuple_print<Tuple, N - 1>::print(t, out);
+        out << ' ' << get<N - 1>(t);
+        // 为什么要反着写？
+        // 因为递归出来打印的顺序是从0 到 n-1!!!!
+    }
+};
+
+// 递归出口
+template <typename Tuple>
+struct tuple_print<Tuple, 1>
+{
+    inline static void print(const Tuple &t, ostream &out)
+    {
+        out << get<0>(t);
+    }
+};
+
+// 重载 左移运算符
+#include <tuple>
+template <typename... Types>
+inline ostream &
+operator<<(ostream &out, const tuple<Types...> &t)
+{
+    // decltype 可以得出变量的类型
+    // 模板参数里面可以放入一个常量，根据常量不同的大小可以调用不同的重载或者特化版本
+    tuple_print<decltype(t), sizeof...(Types)>::print(t, out);
+    return out;
+}
+
+#endif
+```
+
+那么这个这么好用的tuple是怎么实现的呢？
+
+![image-20230427112849536](D:\Typora\Images\image-20230427112849536.png)
+
+**他的大概意思就是接受参数包，然后将参数包分为1和n-1，本类继承上一级(n-1)的类，以此往上继承；由于本类当中的成员是head，就是这个1对应的元素，所以继承过后本类会获得所有的元素，可以通过head和tail接口进行调用!!!!!!**
+
+注意图中右上角的继承关系!!!
+
+tuple里面有两个head和tail函数，这两个在现在的c++里面不太好用，因为新加了很多东西，接口也变了，所以就不用了
+
+# C++ 2.0 新特性
+
+## 第一讲：语言
+
+### 2.variatic templates 参数包
+
+**在类模板中，模板参数包必须是最后一个模板形参. 而在函数模板中则不必!!!!**
+
+![image-20230427170952730](D:\Typora\Images\image-20230427170952730.png)
+
+这个之前提过了，就不细谈了
+
+下面那三个分别对应：
+
+```c++
+typename... Types //模板参数包
+const Types&... args //函数参数类型包
+print(args...) //函数参数包
+```
+
+利用参数包也可以实现万用的hashcode的实现: 之前写过就不细看了
+
+![image-20230427171431489](D:\Typora\Images\image-20230427171431489.png)
+
+### 3.零碎知识点
+
+### nullptr
+
+```c++
+#include <iostream>
+using namespace std;
+
+void f(int)
+{
+    cout << "call of int" << endl;
+}
+
+void f(void *)
+{
+    cout << "call of void*" << endl;
+}
+
+int main()
+{
+    f(0); // calls f(int)
+    // f(NULL);    // 这里会报错，因为NULL既可以指是int 也可以是指针
+    f(nullptr); // calls f(void*)
+
+    return 0;
+}
+```
+
+### auto
+
+提醒：不要有了auto就以后都不写类型了，能不用就不用，除非是在类型名太长或者太复杂的类型才用一下，我们心里需要明白这到底是怎么类型，不要编译器知道了我们不知道
+
+```c++
+#include <iostream>
+using namespace std;
+
+//函数的返回值也可以是auto
+auto Func(const int &val)
+{
+    return val > 0;
+}
+
+int main()
+{
+    // 注意函数指针的写法
+    auto func = [](const int &val) -> bool
+    {
+        return val > 0;
+    };
+    bool (*func2)(const int &val) = Func;
+
+    cout << func(1) << endl;
+    cout << func2(-1) << endl;
+
+    return 0;
+}
+```
+
+### 4.uniform initialization 统一初始化
+
+任何初始化动作都可以用一个共同语法：{ //填入值 }
+
+```c++
+int values[] {1,2,3};
+vector<string>cities{
+"Berlin","New York","London"
+};
+```
+
+示例代码：
+
+```c++
+#include <iostream>
+using namespace std;
+#include <vector>
+
+template <typename Container>
+inline void print(const Container &con)
+{
+    for (auto val : con)
+        cout << val << ' ';
+    cout << endl;
+}
+
+int main()
+{
+    vector<int> v{1, 2, 3};
+    vector<string> cities{
+        "Berlin", "New York", "London"};
+    print(v);
+    print(cities);
+
+    return 0;
+}
+```
+
+## 4.30
+
+### 1.initializer_list<>
+
+在编译器看到 {} 的时候会自动创建出来一个 initializer_list，这是一个类，具体代码实现如下：
+
+```c++
+template <class _E>
+// 这个东西背后是一个 array ,编译器在看见大括号的时候就会预先准备一个 array
+class initializer_list
+{
+public:
+    typedef _E value_type;
+    typedef const _E &reference;
+    typedef const _E &const_reference;
+    typedef size_t size_type;
+    typedef const _E *iterator;
+    typedef const _E *const_iterator;
+
+private:
+    iterator _M_array;
+    size_type _M_len;
+
+    // The compiler can call a private constructor.
+    // 编译器在这里能调用私有的构造函数(编译器可以，我们不可以)
+    // 到这里会把array的头指针和长度传递给array参数,本身并没有内含array(有点像委托)
+    constexpr initializer_list(const_iterator __a, size_type __l)
+        : _M_array(__a), _M_len(__l) {}
+
+public:
+    constexpr initializer_list() noexcept
+        : _M_array(0), _M_len(0) {}
+
+    // Number of elements.
+    constexpr size_type
+    size() const noexcept { return _M_len; }
+
+    // First element.
+    constexpr const_iterator
+    begin() const noexcept { return _M_array; }
+
+    // One past the last element.
+    constexpr const_iterator
+    end() const noexcept { return begin() + size(); }
+};
+```
+
+**关于这个类的拷贝构造，可以看由于在类里面没有对拷贝构造的重写，导致两个initializer_list在拷贝的时候是浅拷贝，两个指针指向同一块内存空间，可能会出现危险，这个需要注意**
+
+STL的容器是如何引入initializer_list的？
+
+![image-20230430111248498](D:\Typora\Images\image-20230430111248498.png)
+
+## 5.4
+
+initializer_list<>里面内置了一个array数组的指针和这个数组的长度，编译器会读取{}里面的元素来进行容器的插入操作以实现初始化操作
+
+示例代码：
+
+```c++
+#include <iostream>
+using namespace std;
+#include <vector>
+#include <initializer_list>
+#include <string>
+
+class Algorithm
+{
+public:
+    // 传入的是一个initializer_list<>
+    template <typename Value_Type>
+    inline Value_Type
+    _min(const initializer_list<Value_Type> &init_list)
+    {
+        return Min(init_list.begin(), init_list.end());
+    }
+
+    template <typename Value_Type>
+    inline Value_Type
+    _max(const initializer_list<Value_Type> &init_list)
+    {
+        return Max(init_list.begin(), init_list.end());
+    }
+
+private:
+    template <typename Input_Iterator>
+    inline typename iterator_traits<Input_Iterator>::value_type
+    Min(Input_Iterator first, Input_Iterator last)
+    {
+        auto Min = *first;
+        for (; first != last; ++first)
+            Min = Min <= *first ? Min : *first;
+        return Min;
+    }
+
+    template <typename Input_Iterator>
+    inline typename iterator_traits<Input_Iterator>::value_type
+    Max(Input_Iterator first, Input_Iterator last)
+    {
+        auto Max = *first;
+        for (; first != last; ++first)
+            Max = Max >= *first ? Max : *first;
+        return Max;
+    }
+};
+
+template <typename Container>
+inline void print(const Container &con)
+{
+    for (auto val : con)
+        cout << val << ' ';
+    cout << endl;
+}
+
+int main()
+{
+    vector<int> v1{2, 5, 7, 13, 69, 83, 50};
+    vector<int> v2({2, 5, 7, 13, 69, 83, 50});
+    vector<int> v3;
+    v3 = {2, 5, 7, 13, 69, 83, 50};
+    v3.insert(v3.begin() + 2, {0, 1, 2, 3, 4});
+    print(v3);
+
+    cout << Algorithm()._max({54, 16, 48, 5}) << endl;
+    cout << Algorithm()._min({string("Ace"), string("Hello"), string("Fuck"), string("Zion")}) << endl;
+
+    return 0;
+}
+```
+
+### 1.explicit
+
+**explicit for ctor taking one argument**
+
+```c++
+#include <iostream>
+using namespace std;
+
+struct Complex
+{
+    int real, imag;
+
+    explicit Complex(int re, int im = 0) : real(re), imag(im) {}
+    //explict关键字的含义 防止类构造函数的隐式自动转换
+    //就是说这里由于只需要传入一个参数，所以编译器很可能会把数字隐式转化为Complex对象
+    //但是加上了explict之后,明确指出不要让编译器这么干，要生成Complex对象只能显式调用构造函数!!!!
+
+    Complex operator+(const Complex &x)
+    {
+        return Complex(real + x.real, imag + x.imag);
+    }
+};
+
+inline ostream &
+operator<<(ostream &os, const Complex &x)
+{
+    os << '(' << x.real << ',' << x.imag << ')';
+    return os;
+}
+
+int main()
+{
+    Complex c1(12, 5);
+    // Complex c2 = c1 + 5; // 加了explicit关键字就不允许编译器直接把5转化为 Complex 类型了
+    cout << c1 << endl;
+
+    return 0;
+}
+```
+
+这是一个实参加上 explicit 关键字的情况，前面已经提过很多了
+
+**explicit for ctors taking more than one argument**
+
+```c++
+#include <iostream>
+using namespace std;
+#include <initializer_list>
+
+struct P
+{
+    P(int a, int b) { cout << "P (int a , int b) " << endl; }
+    // P(initializer_list<int>) { cout << "P (initializer_list<int>) " << endl; }
+    explicit P(int a, int b, int c) { cout << "explicit P (int a , int b , int c) " << endl; }
+};
+
+int main()
+{
+    P p1(77, 5);
+    P p2{77, 5};
+    P p3 = {77, 5};
+
+    P p4{77, 5, 42};
+    // 这个是可以的,因为它既可以看作传入了三个参数，也可以看作传入了初始化序列
+    // 而如果像下面一样加上括号并且有 explicit 关键字就只能传入 三个参数的形式
+
+    P p5({77, 5, 42}); 
+    // 这个在有 explicit 关键字的情况下没有办法把 initializer_list 的形式转化为 a,b,c 的形式，会报错
+
+    return 0;
+}
+```
+
+### 2. =delete,=defalut
+
+```c++
+#include <iostream>
+using namespace std;
+
+// 如果已经定义了一个ctor，那么编译器就不会给一个默认的ctor
+class Zoo
+{
+public:
+    Zoo(int i1, int i2) : d1(i1), d2(i2) {}
+    Zoo(const Zoo &) = delete; // delete表示我不要这一个重载
+    Zoo(Zoo &&) = default;     // default表示我需要这一个重载并且是编译器默认提供给我的这个重载
+    Zoo &operator=(const Zoo &) = default;
+    Zoo &operator=(const Zoo &&) = delete;
+
+    virtual ~Zoo() {}
+
+private:
+    int d1, d2;
+};
+
+int main()
+{
+    Zoo z1(1, 2);
+    // Zoo z2(z1); // 无法使用因为他是已删除的函数
+
+    return 0;
+}
+```
+
+一般是应用在 Big 3 上面，即 构造函数，拷贝构造，拷贝赋值和析构函数
+
+![image-20230504191205113](D:\Typora\Images\image-20230504191205113.png)
+
+其中出现了右值引用，这个目前不了解
+
+```c++
+Zoo(const Zoo&)=delete;// copy ctor
+Zoo(Zoo&&)=default;// move ctor
+```
+
+一个更细的例子：
+
+![image-20230504191639232](D:\Typora\Images\image-20230504191639232.png)
+
+```c++
+#include <iostream>
+using namespace std;
+
+class Foo
+{
+public:
+    // ctor
+    Foo(int i) : _i(i) {}
+    Foo() = default;
+
+    // copy ctor
+    Foo(const Foo &x) : _i(x._i) {}
+    // Foo(const Foo &) = default; // error 都已经定义出来了还要默认的，不行
+    // Foo(const Foo &) = delete;  // error 都已经定义出来又不要了，不行
+
+    // copy assign
+    Foo &operator=(const Foo &x)
+    {
+        _i = x._i;
+        return *this;
+    }
+
+    // Foo &operator=(const Foo &x) = default; // error 都已经定义出来了还要默认的，不行
+    // Foo &operator=(const Foo &x) = delete;  // error 都已经定义出来又不要了，不行
+
+    // void func1() = default; // error 一般的函数没有默认版本，只能用于 big five上面
+    void func2() = delete; // delete可以用在任何函数上面(=0 只能用于 virtual 函数)
+
+    // ~Foo() = delete;//error 不能删除析构函数，这会导致使用Foo对象错误!!!!
+    ~Foo() = default;
+
+private:
+    int _i;
+};
+
+int main()
+{
+    Foo f1; // 如果不写 Foo() = default 编译器不会提供默认构造函数，会报错
+    Foo f2(5);
+    Foo f3(f1);
+    f3 = f2;
+
+    return 0;
+}
+```
+
+对于一个空的类，编译器在处理的时候会提供默认的big 3，即 构造函数，拷贝构造，拷贝赋值，析构函数
+
+```c++
+class Empty{ };
+
+//空的，但是编译器会提供
+class Empty{
+public:
+    //ctor
+    Empty(){ ... }
+    //copy ctor
+    Empty(const Empty& rhs){ ... }
+    //copy assign
+    Empty& operator=(const Empty& rhs){ ... }
+    //dctor
+    ~Empty(){ ... }
+}
+
+//以下代码对于一个空类是合法的
+{
+    Empty e1;
+    Empty e2(e1);
+    e2=e1;
+}
+```
+
+那么我们怎么确认是用默认的还是自己写的呢？
+
+classes with or without pointer members!!!!
+
+**带有指针的类基本上都需要重写 big 3；不带指针的基本都不需要写!!!!!**
+
+### No-Copy and Private-Copy
+
+![image-20230504201206953](D:\Typora\Images\image-20230504201206953.png)
+
+```c++
+#include <iostream>
+using namespace std;
+
+struct Nocopy
+{
+    Nocopy() = default;
+    Nocopy(const Nocopy &) = delete;            // no copy
+    Nocopy &operator=(const Nocopy &) = delete; // no assign
+    ~Nocopy() = default;
+};
+
+struct NoDtor
+{
+    NoDtor() = default;
+    ~NoDtor() = delete; // 非常不建议这么去做
+};
+
+void testNoDtor()
+{
+    // NoDtor nd;//栈区对象的生命周期在这个函数结束就销毁了，这时候会自动调用dtor，没有则报错
+    NoDtor *p = new NoDtor; // 动态开辟是允许的，但是无法销毁
+    // delete p;               // 不允许销毁
+}
+
+class PrivateCopy
+{
+private:
+    // 这个类无法被一般的代码调用，但是可以被friend和member调用copy
+    // 如果要禁止，不仅需要放到private里面，还要加上 = delete
+    PrivateCopy(const PrivateCopy &);
+    PrivateCopy &operator=(const PrivateCopy &);
+
+public:
+    PrivateCopy() = default;
+    ~PrivateCopy();
+};
+
+int main()
+{
+    testNoDtor();
+
+    return 0;
+}
+```
+
+### 3.Alias(化名) Template (template typedef)
+
+![image-20230504202940442](D:\Typora\Images\image-20230504202940442.png)
+
+**值得注意的是下面两个没办法实现我们想要的结果!!!!**
+
+### test_moveable函数测试
+
+这么写始终会报错，看起来是没有办法把容器和容器模板的类型分开来进行传入的
+
+![image-20230504213412890](D:\Typora\Images\image-20230504213412890.png)
+
+所以可以这么写：
+
+![image-20230504213510643](D:\Typora\Images\image-20230504213510643.png)
+
+### 4.template template parameter 双重模板参数
 
