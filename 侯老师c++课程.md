@@ -4491,7 +4491,7 @@ int main()
 }
 ```
 
-### 3.Alias(化名) Template (template typedef)
+### 3.Alias(化名) Template (template typedef) 模板的化名
 
 ![image-20230504202940442](D:\Typora\Images\image-20230504202940442.png)
 
@@ -4507,5 +4507,532 @@ int main()
 
 ![image-20230504213510643](D:\Typora\Images\image-20230504213510643.png)
 
-### 4.template template parameter 双重模板参数
+## 5.5
+
+### 1.template template parameter 双重模板参数
+
+![image-20230505102818021](D:\Typora\Images\image-20230505102818021.png)
+
+```c++
+#include <iostream>
+using namespace std;
+#define SIZE 1e6
+#include <string>
+#include <vector>
+#include <list>
+#include <deque>
+
+template <typename Type>
+inline void output_static_data(const Type &obj)
+{
+    cout << "static_data: " << endl; // 输出静态成员
+}
+
+// template template paremeter 双重模板参数
+template <class Value_Type,
+          template <class> // 这样写表示 Container模板使用 Value_Type 类型
+          class Container>
+// 这里由于传入的是容器，绝大多数的容器都有两个参数，第一个是元素类型，第二个是分配器，然而分配器又是以元素类型的模板
+// 编译器无法推导第二个分配器的参数，虽然有默认值，所以就需要用到 Alias 来设置
+class XCls
+{
+private:
+    Container<Value_Type> c;
+
+public:
+    XCls()
+    {
+        for (long i = 0; i < SIZE; ++i)
+            c.insert(c.end(), Value_Type());
+
+        output_static_data(Value_Type());
+        Container<Value_Type> c1(c);
+        Container<Value_Type> c2(std::move(c));
+        c1.swap(c2);
+    }
+};
+
+#include <ext/pool_allocator.h>
+namespace Alias
+{
+    template <typename Value_Type>
+    using Vec = vector<Value_Type, __gnu_cxx::__pool_alloc<Value_Type>>;
+
+    template <typename Value_Type>
+    using Lst = list<Value_Type, __gnu_cxx::__pool_alloc<Value_Type>>;
+
+    template <typename Value_Type>
+    using Deq = deque<Value_Type, __gnu_cxx::__pool_alloc<Value_Type>>;
+}
+
+using namespace Alias;
+int main()
+{
+    XCls<string, Vec> c;
+    XCls<string, Lst> c2;
+    XCls<string, Deq> c3;
+
+    return 0;
+}
+```
+
+### 2.type alias 类型化名
+
+type alias 和 typedef 没有任何的不同
+
+```c++
+#include <iostream>
+using namespace std;
+#include <vector>
+
+// type alias 和 typedef 没有任何的不同
+namespace Test
+{
+    void test01(int, int)
+    {
+        cout << "test01" << endl;
+    }
+
+    template <typename T>
+    struct Container
+    {
+        using Value_Type = T;
+    };
+
+    template <class CharT>
+    using mystring = std::basic_string<CharT, std::char_traits<CharT>>;
+
+    template <class Container>
+    void fn2(const Container &con)
+    {
+        using Value_Type = typename iterator_traits<typename Container::iterator>::value_type;
+        cout << "fn2" << endl;
+    }
+}
+
+using namespace Test;
+int main()
+{
+    // func现在指向参数如下的函数
+    using func = void (*)(int, int);
+    func f1 = test01;
+    f1(1, 1);
+
+    mystring<char> str;
+
+    fn2(vector<int>());
+
+    return 0;
+}
+```
+
+### 3.noexcept 保证不会抛出异常
+
+**我们必须通知C++(特别是 std::vector)，move ctor 和 move assignment 和 dtor不会抛出异常，前两个都是右值引用**
+
+**以vector为例，vector容器在扩充空间的时候，是以2倍空间扩充，需要新找一块内存将当前的数据移动到新数据块中，这就需要用到 move ctor，并且如果不是noexcept，vector不敢调用它，只有是noexcept的时候vector才会调用它**
+
+注意：growable containers只有两种：vector和deque
+
+![image-20230505152557462](D:\Typora\Images\image-20230505152557462.png)
+
+至于move ctor和move assignment，到后面再说
+
+### 4.override 覆写 特用于虚函数重写上面
+
+**这个需要保证子类和父类这个虚函数的名称，返回值，参数类型，个数，位置完全相同!!!!!**
+
+```c++
+#include <iostream>
+using namespace std;
+
+struct Base
+{
+    virtual void func(float) { cout << "Base func float" << endl; }
+};
+
+struct Derived1 : public Base
+{
+    // 第一个是定义了一个新的虚函数,不是override
+    virtual void func(int) { cout << "Derived1 func int" << endl; }
+    // 第二个才是上面父类的override
+    virtual void func(float) override { cout << "Derived1 func float" << endl; }
+};
+
+int main()
+{
+    Derived1().func(1.1);
+
+    return 0;
+}
+```
+
+### 5.final
+
+用来修饰class表示不允许类继承自己；用来修饰虚函数virtual表示不允许子类override这个函数
+
+```c++
+#include <iostream>
+using namespace std;
+
+struct Base1 final // final表示不允许有类继承自己
+{
+};
+
+//  error
+// struct Derived1 : Base1
+// {
+// };
+
+struct Base2
+{
+    virtual void f() final; // final表示不允许子类覆写这个函数
+};
+
+struct Derived2 : Base2
+{
+    // void f(); //error
+};
+
+int main()
+{
+
+    return 0;
+}
+```
+
+### 6.decltype
+
+用来得到一个表达式的类型，有三大应用:
+
+1.declare return types
+
+```c++
+#include <iostream>
+using namespace std;
+
+namespace Test {
+template <typename Value_Type1, typename Value_Type2>
+auto add(const Value_Type1& x, const Value_Type2& y)
+    -> decltype(x + y) {  // 不写在前面是因为编译器先后次序编译不认识x,y，所以放在后面用 -> 来指明auto的类型
+    return x + y;
+}
+}  // namespace Test
+
+using namespace Test;
+int main() {
+    cout << add(1, 2) << endl;
+    cout << add(1.1, 2) << endl;
+
+    return 0;
+}
+```
+
+2.in metaprogramming 元编程 就是用在泛型里面
+
+3.lambdas
+
+一个应用：
+
+```c++
+#include <iostream>
+using namespace std;
+#include <set>
+#include <string>
+
+namespace Test {
+
+class Person {
+public:
+    Person() = default;
+    Person(string firstname, string lastname)
+        : _firstname(firstname), _lastname(lastname) {}
+
+public:
+    string _firstname;
+    string _lastname;
+};
+
+ostream&
+operator<<(ostream& os, const Person& p) {
+    os << '(' << p._firstname << ',' << p._lastname << ')';
+    return os;
+}
+
+auto CmpPerson = [](const Person& p1, const Person& p2) {
+    return (p1._lastname < p2._lastname) ||
+           (p1._lastname == p2._lastname) && (p1._firstname < p2._firstname);
+};
+
+struct Cmp
+    : binary_function<Person, Person, bool> {
+    // 被比较的不能被修改，编译器非常灵敏，需要加上const
+    bool operator()(const Person& p1, const Person& p2) const {
+        return (p1._lastname < p2._lastname) ||
+               (p1._lastname == p2._lastname) && (p1._firstname < p2._firstname);
+    }
+} cmps;
+
+template <typename Container>
+inline void print(const Container& con) {
+    for (auto val : con)
+        cout << val << ' ';
+    cout << endl;
+}
+
+}  // namespace Test
+
+using namespace Test;
+int main() {
+    Person p1("John", "Wall");
+    Person p2("David", "Paul");
+    Person p3("Steve", "Paul");
+
+    // 这里需要如果括号里不给CmpPerson参数，会调用CmpPerson的默认构造函数，不幸的是没有默认构造，所以需要给出
+    set<Person, decltype(CmpPerson)> s({p1, p2, p3}, CmpPerson);
+    print(s);
+    return 0;
+}
+```
+
+<img src="D:\Typora\Images\image-20230505195009665.png" alt="image-20230505195009665" style="zoom:67%;" />
+
+### 7.lambdas
+
+![image-20230505190504411](D:\Typora\Images\image-20230505190504411.png)
+
+[ ]里可以指定是以 value 还是以 reference 的形式传入，( )后面那三个东西是可选的，但是只要有一个出现那么( )就必须写出来，所以建议都写上( )
+
+```c++
+#include <iostream>
+using namespace std;
+
+int main() {
+    []() -> void {
+        cout << "hello lambda" << endl;
+    }();  // 前三个是格式 最后一个括号代表调用
+
+    auto I = []() -> void {
+        cout << "hello lambda" << endl;
+    };
+    I();
+
+    int id1 = 0, id2 = 0;
+    // 为什么下面打印出来是0 1 2
+    // 因为这里的id1传进去是0，还没走到下面
+    // 由于是 value 传递，所以是copy操作，内部的id不会影响外面的id
+    auto f = [id1, &id2]() mutable {
+        // 如果不写 mutable ，这个id进来之后只能read only，不能++
+        cout << "id1: " << id1 << ',' << "id2: " << id2 << endl;
+        ++id1;
+        ++id2;
+    };
+
+    // 上面lambda表达式的相对接近的写法(不对等，有小区别)
+    // class Functor {
+    // private:
+    //     int id1;  // copy of outside id1
+    //     int id2;  // reference of outside id2
+
+    // public:
+    //     void operator()() {
+    //         cout << "id1: " << id1 << ',' << "id2: " << id2 << endl;
+    //         ++id1;
+    //         ++id2;
+    //     }
+    // };
+    // Functor f;
+
+    id1 = 42, id2 = 42;
+    f();  // 0 42
+    f();  // 1 43
+    f();  // 2 44
+    cout << id1 << ' ' << id2 << endl;
+
+    return 0;
+}
+```
+
+与上一个的例子联系起来，也让我们对set的底层实现有了更多的理解
+
+**这也解释了为什么在传入lambda的时候需要在括号里面指定这个函数变量，看他的构造就行了**
+
+![image-20230505195056962](D:\Typora\Images\image-20230505195056962.png)
+
+所以在functor和lambda之后，选择functor显然会稍微好一点
+
+另一个例子：
+
+```c++
+#include <iostream>
+using namespace std;
+#include <algorithm>
+#include <vector>
+
+class LambdaFunctor {
+public:
+    LambdaFunctor(int x, int y)
+        : _x(x), _y(y) {}
+
+    bool operator()(int val) {
+        return val > _x && val < _y;
+    }
+
+private:
+    int _x;
+    int _y;
+};
+
+template <typename Value_Type>
+inline void printVector(const vector<Value_Type>& vec) {
+    for (auto val : vec)
+        cout << val << ' ';
+    cout << endl;
+}
+
+int main() {
+    int x = 30, y = 100;
+
+    vector<int> v1{5, 28, 50, 83, 70, 590, 245, 59, 24};
+    vector<int> v2{5, 28, 50, 83, 70, 590, 245, 59, 24};
+
+    // 注意remove系列操作是假remove，需要erase才能真正删除
+    auto newEnd1 = remove_if(v1.begin(), v1.end(), [x, y](int val) {
+        return val > x && val < y;
+    });
+    v1.erase(newEnd1, v1.end());
+
+    v2.erase(remove_if(v1.begin(), v1.end(), LambdaFunctor(x, y)), v2.end());
+
+    printVector(v1);
+    printVector(v2);
+
+    return 0;
+}
+```
+
+### 8.variadic templates
+
+之前已经提到过很多次了，举一些例子：
+
+```c++
+#include <iostream>
+using namespace std;
+
+static int value = 0;
+
+namespace Test {
+inline void _func() {}
+
+template <typename Value_Type, typename... Types>
+inline void _func(const Value_Type& firstArg, const Types&... args) {
+    ++value;
+    _func(args...);
+}
+
+// 包装
+template <typename... Types>
+inline void func(const Types&... args) {
+    _func(args...);
+    cout << "value: " << value << endl;
+}
+
+}  // namespace Test
+
+using namespace Test;
+int main() {
+    func(1, 2, 3, 4, 5);             // 5
+    func("string", "fuck", 2, 1.2);  // 9
+
+    return 0;
+}
+```
+
+第二个例子：用c++模拟printf函数(简易版)
+
+```c++
+#include <iostream>
+using namespace std;
+
+namespace Print {
+// 代码中抛出异常的部分先不管
+// 用参数包重写printf函数 理解
+inline void myprintf(const char* str) {
+    while (*str) {
+        if (*str == '%' && *(++str) != '%')  // 已经没有参数包了还有控制符号，不对劲，抛出异常
+            throw runtime_error("invalid format string: missing arguments.");
+        cout << *str++;
+    }
+}
+
+template <typename Value_Type, typename... Types>
+inline void myprintf(const char* str, const Value_Type& val, const Types&... args) {
+    while (*str) {
+        if (*str == '%' && *(++str) != '%') {  // 遇到控制符号了
+            cout << val;
+            myprintf(++str, args...);
+            return;
+        }
+        cout << *str++;
+    }
+    throw logic_error("extra arguments provided to myprintf");
+}
+}  // namespace Print
+
+using namespace Print;
+int main() {
+    myprintf("hello\n");
+
+    int* pi = new int;
+    // 但是这么模拟有一个很大的问题，就是控制符号我们没去管，但是介于只是一个简单的模拟，还是可以的
+    myprintf("%d %s %p %f\n", 15, "This is Ace.", pi, 3.1415926535);
+    delete pi;
+
+    return 0;
+}
+```
+
+### 打印tuple(这个例子非常巧妙)
+
+![image-20230505213553781](D:\Typora\Images\image-20230505213553781.png)
+
+```c++
+#include <iostream>
+using namespace std;
+#include <bitset>
+#include <string>
+#include <tuple>
+
+namespace PRINT {
+
+template <int index, int max, typename... Args>
+struct Tuple_Print {
+    inline static void print(ostream& os, const tuple<Args...>& t) {
+        os << get<index>(t) << (index + 1 != max ? "," : "");  // 如果不是最后一个就是 , 号
+        Tuple_Print<index + 1, max, Args...>::print(os, t);
+    }
+};
+
+// 递归终点
+template <int max, typename... Args>
+struct Tuple_Print<max, max, Args...> {
+    inline static void print(ostream& os, const tuple<Args...>& t) {}
+};
+
+}  // namespace PRINT
+
+template <typename... Args>
+inline ostream&
+operator<<(ostream& os, const tuple<Args...>& t) {
+    os << "[";
+    PRINT::Tuple_Print<0, sizeof...(Args), Args...>::print(os, t);
+    return os << "]";
+}
+
+int main() {
+    cout << make_tuple(7.5, string("hello"), bitset<16>(377), 42) << endl;
+
+    return 0;
+}
+```
 
