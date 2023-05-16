@@ -4316,7 +4316,7 @@ int main()
 }
 ```
 
-### 2. =delete,=defalut
+### 2. =delete,=default
 
 ```c++
 #include <iostream>
@@ -5036,3 +5036,522 @@ int main() {
 }
 ```
 
+## 第二讲：标准库
+
+## 5.16
+
+### 1.右值引用
+
+Lvalue：只能出现在operator = 左边
+
+Rvalue：只能出现再operator = 右边
+
+**临时对象是一个右值，右值不能出现在 = 号的左边，临时对象tmp一定被当作右值!!!!!**
+
+注意copy ctor和move ctor之间的区别：
+
+![image-20230514163001551](D:\Typora\Images\image-20230514163001551.png)
+
+**move()：标准库提供的可以把左值变为右值的函数**
+
+**Perfect Forwarding:在途中把Vtype(buf)(右值)交给Mystring的move ctor的时候会先经过insert函数在调用move ctor，这就有一个中间传递的过程，所以如何做到Perfect Forwarding是一个非常重要的事情，确保该传递的信息不能丢失**
+
+<img src="D:\Typora\Images\image-20230514170850534.png" alt="image-20230514170850534" style="zoom:67%;" />
+
+Unperfect Forwarding
+
+![image-20230514171027632](D:\Typora\Images\image-20230514171027632.png)
+
+Perfect Forwarding的具体实现：
+
+![image-20230516105734995](D:\Typora\Images\image-20230516105734995.png)
+
+写一个 move aware class
+
+![image-20230516114646497](D:\Typora\Images\image-20230516114646497.png)
+
+在 move ctor 当中，为什么要把原来的指针设为nullptr呢？(打断)
+
+**这是因为假如传入的右值对象是临时对象，临时对象的生命周期就只有这一句代码，执行完过后就会被释放，如果不打断，对于这里的string而言，就会调用析构函数把这个临时对象以及临时对象指向的区域给释放掉，因此就影响到了_data的部分，虽然这个临时对象今后不再用了，但是我们还是要把它与我们偷来的数据进行打断，并且配套的在析构函数的部分将其释放，否则会出现上面的问题**
+
+move ctor和move asgn的测试
+
+MyString.h
+
+```c++
+#ifndef _MYSTRING_H_
+#define _MYSTRING_H_
+
+using namespace std;
+#include <cstring>
+#include <iostream>
+#include <string>
+// 写一个 move aware class
+class Mystring {
+public:
+    static size_t DCtor;  // 累计 default-ctor呼叫次数
+    static size_t Ctor;   // 累计 ctor呼叫次数
+    static size_t CCtor;  // 累计 copy-ctor呼叫次数
+    static size_t CAsgn;  // 累计 copy-asgn呼叫次数
+    static size_t MCtor;  // 累计 move-ctor呼叫次数
+    static size_t MAsgn;  // 累计 move-asgn呼叫次数
+    static size_t Dtor;   // 累计 default-ctor呼叫次数
+private:
+    char* _data;
+    size_t _len;
+
+    void _init_data(const char* s) {
+        _data = new char[_len + 1];
+        memcpy(_data, s, _len);  // 这是一个深拷贝
+        _data[_len] = '\0';
+    }
+
+public:
+    // default-ctor
+    Mystring() : _data(nullptr), _len(0) { ++DCtor; }
+
+    // ctor
+    Mystring(const char* p) : _len(strlen(p)) {
+        ++Ctor;
+        _init_data(p);
+    }
+
+    // copy-ctor
+    Mystring(const Mystring& str) : _len(str._len) {
+        ++CCtor;
+        _init_data(str._data);
+    }
+
+    // copy-asgn
+    Mystring& operator=(const Mystring& str) {
+        ++CAsgn;
+        // 自我赋值检查
+        if (this != &str) {
+            _len = str._len;
+            _init_data(str._data);
+        } else
+            throw invalid_argument("cannot assign yourself.");
+        return *this;
+    }
+
+    // move ctor, with noexcept
+    Mystring(Mystring&& str) noexcept : _data(str._data), _len(str._len) {  // 指针相同表示指向同一块内存，就是一个偷的动作，是浅拷贝!!!
+        // 完事之后将原来的str处理一下，能够传入右值引用都表示今后这个东西不用了
+        // 所以不用了，但是也不要删除掉
+        ++MCtor;
+        str._len = 0;
+        str._data = nullptr;  // 重要!!!
+    }
+
+    // move asgn, with noexcept
+    Mystring& operator=(Mystring&& str) {
+        ++MAsgn;
+        // 自我赋值检查
+        if (this != &str) {
+            _data = str._data;
+            _len = str._len;
+
+            str._len = 0;
+            str._data = nullptr;
+        }
+        return *this;
+    }
+
+    // dtor
+    virtual ~Mystring() {
+        ++DCtor;
+        if (_data)
+            delete _data;
+    }
+
+    // operator <
+    bool operator<(const Mystring& rhs) const {  // 为了set
+        return string(this->_data) < string(rhs._data);
+    }
+
+    // operator ==
+    bool operator==(const Mystring& rhs) const {  // 为了set
+        return string(this->_data) == string(rhs._data);
+    }
+
+    char* get() const { return _data; }
+};
+
+// 初始化静态变量
+size_t Mystring::DCtor = 0;  // 累计 default-ctor呼叫次数
+size_t Mystring::Ctor = 0;   // 累计 ctor呼叫次数
+size_t Mystring::CCtor = 0;  // 累计 copy-ctor呼叫次数
+size_t Mystring::CAsgn = 0;  // 累计 copy-asgn呼叫次数
+size_t Mystring::MCtor = 0;  // 累计 move-ctor呼叫次数
+size_t Mystring::MAsgn = 0;  // 累计 move-asgn呼叫次数
+size_t Mystring::Dtor = 0;   // 累计 default-ctor呼叫次数
+
+// 处理hashcode 放在std中和标准库合并
+namespace std {
+template <>
+struct hash<Mystring> {
+    size_t operator()(const Mystring& s) {
+        return hash<string>()(string(s.get()));
+    }
+};
+}  // namespace std
+
+#endif
+```
+
+MyStrNoMove.h
+
+```c++
+#ifndef _MYSTRNOMOVE_H_
+#define _MYSTRNOMOVE_H_
+
+using namespace std;
+#include <cstring>
+#include <iostream>
+#include <string>
+
+class MyStrNoMove {
+    // 拿掉move ctor和 move asgn
+public:
+    static size_t DCtor;  // 累计 default-ctor呼叫次数
+    static size_t Ctor;   // 累计 ctor呼叫次数
+    static size_t CCtor;  // 累计 copy-ctor呼叫次数
+    static size_t CAsgn;  // 累计 copy-asgn呼叫次数
+    static size_t MCtor;  // 累计 move-ctor呼叫次数
+    static size_t MAsgn;  // 累计 move-asgn呼叫次数
+    static size_t Dtor;   // 累计 default-ctor呼叫次数
+private:
+    char* _data;
+    size_t _len;
+
+    void _init_data(const char* s) {
+        _data = new char[_len + 1];
+        memcpy(_data, s, _len);  // 这是一个深拷贝
+        _data[_len] = '\0';
+    }
+
+public:
+    // default-ctor
+    MyStrNoMove() : _data(nullptr), _len(0) { ++DCtor; }
+
+    // ctor
+    MyStrNoMove(const char* p) : _len(strlen(p)) {
+        ++Ctor;
+        _init_data(p);
+    }
+
+    // copy-ctor
+    MyStrNoMove(const MyStrNoMove& str) : _len(str._len) {
+        ++CCtor;
+        _init_data(str._data);
+    }
+
+    // copy-asgn
+    MyStrNoMove& operator=(const MyStrNoMove& str) {
+        ++CAsgn;
+        // 自我赋值检查
+        if (this != &str) {
+            _len = str._len;
+            _init_data(str._data);
+        } else
+            throw invalid_argument("cannot assign yourself.");
+        return *this;
+    }
+
+    // dtor
+    virtual ~MyStrNoMove() {
+        ++DCtor;
+        if (_data)
+            delete _data;
+    }
+
+    // operator <
+    bool operator<(const MyStrNoMove& rhs) const {  // 为了set
+        return string(this->_data) < string(rhs._data);
+    }
+
+    // operator ==
+    bool operator==(const MyStrNoMove& rhs) const {  // 为了set
+        return string(this->_data) == string(rhs._data);
+    }
+
+    char* get() const { return _data; }
+};
+
+// 初始化静态变量
+size_t MyStrNoMove::DCtor = 0;  // 累计 default-ctor呼叫次数
+size_t MyStrNoMove::Ctor = 0;   // 累计 ctor呼叫次数
+size_t MyStrNoMove::CCtor = 0;  // 累计 copy-ctor呼叫次数
+size_t MyStrNoMove::CAsgn = 0;  // 累计 copy-asgn呼叫次数
+size_t MyStrNoMove::MCtor = 0;  // 累计 move-ctor呼叫次数
+size_t MyStrNoMove::MAsgn = 0;  // 累计 move-asgn呼叫次数
+size_t MyStrNoMove::Dtor = 0;   // 累计 default-ctor呼叫次数
+
+// 处理hashcode 放在std中和标准库合并
+namespace std {
+template <>
+struct hash<MyStrNoMove> {
+    size_t operator()(const MyStrNoMove& s) {
+        return hash<string>()(string(s.get()));
+    }
+};
+}  // namespace std
+
+#endif
+```
+
+test.h
+
+```c++
+#ifndef _TEST_H_
+#define _TEST_H_
+
+#include <ctime>
+#include <deque>
+#include <iostream>
+#include <list>
+#include <set>
+#include <unordered_set>
+#include <vector>
+using namespace std;
+#include "25_MyStrNoMove.h"
+#include "25_Mystring.h"
+
+namespace Test {
+//--------------------------------------------------------
+template <typename MyString>
+void output_static_data(const MyString &str) {
+    cout << typeid(str).name() << "--" << endl;
+    cout << "CCtor= " << MyString::CCtor
+         << " MCtor= " << MyString::MCtor
+         << " CAsgn= " << MyString::CAsgn
+         << " MAsgn= " << MyString::MAsgn
+         << " Dtor= " << MyString::Dtor
+         << " Ctor= " << MyString::Ctor
+         << " DCtor= " << MyString::DCtor
+         << endl;
+}
+
+// test_moveable
+template <typename M, typename NM>
+void test_moveable(M c1, NM c2, long &value) {
+    char buf[10];
+
+    // 测试 moveable
+    cout << "\ntest, with moveable elements" << endl;
+    typedef typename iterator_traits<typename M::iterator>::value_type V1type;
+    clock_t timeStart = clock();
+    for (long i = 0; i < value; ++i) {
+        snprintf(buf, 10, "%d", rand());
+        auto ite = c1.end();
+        c1.insert(ite, V1type(buf));
+    }
+    cout << "construction, milli-seconds : " << double(clock() - timeStart) / 1000 << endl;
+    cout << "size()= " << c1.size() << endl;
+    output_static_data(*(c1.begin()));
+
+    timeStart = clock();
+    M c11(c1);
+    cout << "copy, milli-seconds : " << double(clock() - timeStart) / 1000 << endl;
+
+    timeStart = clock();
+    M c12(std::move(c1));
+    cout << "move copy, milli-seconds : " << double(clock() - timeStart) / 1000 << endl;
+
+    timeStart = clock();
+    c11.swap(c12);
+    cout << "swap, milli-seconds : " << double(clock() - timeStart) / 1000 << endl;
+
+    // 测试 non-moveable
+    cout << "\ntest, with non-moveable elements" << endl;
+    typedef typename iterator_traits<typename NM::iterator>::value_type V2type;
+    timeStart = clock();
+    for (long i = 0; i < value; ++i) {
+        snprintf(buf, 10, "%d", rand());
+        auto ite = c2.end();
+        c2.insert(ite, V2type(buf));
+    }
+
+    cout << "construction, milli-seconds : " << double(clock() - timeStart) / 1000 << endl;
+    cout << "size()= " << c2.size() << endl;
+    output_static_data(*(c2.begin()));
+
+    timeStart = clock();
+    NM c21(c2);
+    cout << "copy, milli-seconds : " << double(clock() - timeStart) / 1000 << endl;
+
+    timeStart = clock();
+    NM c22(std::move(c2));
+    cout << "move copy, milli-seconds : " << double(clock() - timeStart) / 1000 << endl;
+
+    timeStart = clock();
+    c21.swap(c22);
+    cout << "swap, milli-seconds : " << double(clock() - timeStart) / 1000 << endl;
+}
+//--------------------------------------------------------
+
+// 将标识位 清0
+void clear() {
+    Mystring::DCtor = 0;
+    Mystring::Ctor = 0;
+    Mystring::CCtor = 0;
+    Mystring::CAsgn = 0;
+    Mystring::MCtor = 0;
+    Mystring::MAsgn = 0;
+    Mystring::Dtor = 0;
+
+    MyStrNoMove::DCtor = 0;
+    MyStrNoMove::Ctor = 0;
+    MyStrNoMove::CCtor = 0;
+    MyStrNoMove::CAsgn = 0;
+    MyStrNoMove::MCtor = 0;
+    MyStrNoMove::MAsgn = 0;
+    MyStrNoMove::Dtor = 0;
+}
+
+// test_vector
+void test_vector(long &value) {
+    cout << "\ntest_vector().......... \n";
+    test_moveable(vector<Mystring>(), vector<MyStrNoMove>(), value);
+    cout << endl;
+}
+
+// test_list
+void test_list(long &value) {
+    cout << "\ntest_list().......... \n";
+    test_moveable(list<Mystring>(), list<MyStrNoMove>(), value);
+    cout << endl;
+}
+
+// test_deque
+void test_deque(long &value) {
+    cout << "\ntest_deque().......... \n";
+    test_moveable(deque<Mystring>(), deque<MyStrNoMove>(), value);
+    cout << endl;
+}
+
+// test_multiset
+void test_multiset(long &value) {
+    cout << "\ntest_multiset().......... \n";
+    test_moveable(multiset<Mystring>(), multiset<MyStrNoMove>(), value);
+    cout << endl;
+}
+
+// test_unordered_multiset
+// void test_unordered_multiset(long &value) {
+//     cout << "\ntest_unordered_multiset().......... \n";
+//     test_moveable(unordered_multiset<Mystring>(), unordered_multiset<MyStrNoMove>(), value);
+//     cout << endl;
+// }
+}  // namespace Test
+
+#endif
+```
+
+main.cpp
+
+```c++
+#include <iostream>
+using namespace std;
+#include "25_MyStrNoMove.h"
+#include "25_Mystring.h"
+#include "25_test.h"
+
+int main() {
+    long value = 3 * 10e5;
+
+    Test::test_vector(value);
+    Test::clear();
+
+    Test::test_list(value);
+    Test::clear();
+
+    Test::test_deque(value);
+    Test::clear();
+
+    Test::test_multiset(value);
+    Test::clear();
+
+    // Test::test_unordered_multiset(value);
+    // Test::clear();
+
+    return 0;
+}
+```
+
+执行结果：
+
+![image-20230516165803938](D:\Typora\Images\image-20230516165803938.png)
+
+## 适配器 Adapter 补充
+
+### 2.X适配器：ostream_iterator
+
+可以用来连接 cout
+
+![image-20230516203937375](D:\Typora\Images\image-20230516203937375.png)
+
+```c++
+#include <algorithm>  //std::copy
+#include <iostream>   //std::cout
+#include <iterator>   //std::ostream_iterator
+#include <vector>     //std::vector
+
+int main() {
+    std::vector<int> v;
+    for (int i = 0; i < 10; ++i) v.push_back(i * 10);
+
+    std::ostream_iterator<int> out_it(std::cout, ",");
+    std::copy(v.begin(), v.end(), out_it);
+    std::cout << std::endl;
+
+    return 0;
+}
+```
+
+### 3.istream_iterator
+
+可以用来连接 cin
+
+![image-20230516205607537](D:\Typora\Images\image-20230516205607537.png)
+
+```c++
+#include <iostream>  //std::cin std::cout
+#include <iterator>  //std::istream_iterator
+
+int main() {
+    double value1, value2;
+    std::cout << "Please,insert two values: ";
+    std::istream_iterator<double> eos;             // end-of-stream iterator
+    std::istream_iterator<double> iter(std::cin);  // stdin iterator
+
+    if (iter != eos)
+        value1 = *iter;
+    ++iter;
+    if (iter != eos)
+        value2 = *iter;
+
+    std::cout << value1 << " * " << value2 << " == " << value1 * value2 << std::endl;
+
+    return 0;
+}
+```
+
+### 4.type traits
+
+![image-20230516212207244](D:\Typora\Images\image-20230516212207244.png)
+
+以前的版本由于标准的限制，最好写自定义类的时候也要带上这个 __type_traits<>
+
+C++2.0 新版本
+
+**trivial 不重要的**
+**POD plain old data 平淡的旧风格的，指的就是C风格的，也就是只有成员变量没有成员方法**
+
+![image-20230516221129783](D:\Typora\Images\image-20230516221129783.png)
+
+![image-20230516221225536](D:\Typora\Images\image-20230516221225536.png)
+
+type traits 测试
+
+<img src="D:\Typora\Images\image-20230516221737119.png" alt="image-20230516221737119" style="zoom:67%;" />
