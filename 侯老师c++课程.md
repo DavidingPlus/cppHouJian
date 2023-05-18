@@ -5555,3 +5555,275 @@ C++2.0 新版本
 type traits 测试
 
 <img src="D:\Typora\Images\image-20230516221737119.png" alt="image-20230516221737119" style="zoom:67%;" />
+
+type_traits 实现 is_void(了解)
+
+![image-20230517141545661](D:\Typora\Images\image-20230517141545661.png)
+
+```C++
+#include <iostream>
+using namespace std;
+#include <type_traits>
+
+// my_isVoid 简单版本
+template <class Value_Type>
+struct my_isVoid : public false_type {};
+
+// 特化版本
+template <>
+struct my_isVoid<void> : public true_type {};
+
+int main() {
+    cout << my_isVoid<int>::value << endl;
+    cout << my_isVoid<void>::value << endl;
+
+    return 0;
+}
+```
+
+# 内存管理
+
+## 第一讲：primitives
+
+## 5.18
+
+### 1.c++应用程序
+
+<img src="D:\Typora\Images\image-20230518140540645.png" alt="image-20230518140540645" style="zoom:67%;" />
+
+### c++内存的基本工具
+
+<img src="D:\Typora\Images\image-20230518140911306.png" alt="image-20230518140911306" style="zoom:50%;" />
+
+测试程序：
+
+```c++
+#include <iostream>
+using namespace std;
+#include <complex>
+#include <ext/pool_allocator.h>
+
+int main() {
+    // 三种使用方法
+    void* p1 = malloc(512);  // 512 bytes
+    cout << p1 << endl;
+    free(p1);
+
+    complex<int>* p2 = new complex<int>;
+    cout << p2 << endl;
+    delete p2;
+
+    void* p3 = ::operator new(512);  // 512 bytes
+    cout << p3 << endl;
+    ::operator delete(p3);
+
+// 以下使用 C++ 标准库提供的 allocators。
+// 虽然接口都有标准规格，但是调用方式略有区别
+#ifdef _MSC_VER
+    // 以下兩函數都是 non-static，定要通過 object 調用。以下分配 3 個 ints.
+    int* p4 = allocator<int>().allocate(3, (int*)0);
+    allocator<int>().deallocate(p4, 3);
+#endif
+
+#ifdef __BORLANDC__
+    // 以下兩函數都是 non-static，定要通過 object 調用。以下分配 5 個 ints.
+    int* p4 = allocator<int>().allocate(5);
+    allocator<int>().deallocate(p4, 5);
+#endif
+
+//调用这一个
+#ifdef __GNUC__
+    // 以下兩函數都是 static，可通過全名調用之。以下分配 512 bytes.
+    // void* p4 = alloc::allocate(512);
+    // alloc::deallocate(p4, 512);
+
+    // 以下兩函數都是 non-static，定要通過 object 調用。以下分配 7 個 ints.
+    void* p4 = allocator<int>().allocate(7);
+    cout << p4 << endl;
+    allocator<int>().deallocate((int*)p4, 7);
+
+    // 以下兩函數都是 non-static，定要通過 object 調用。以下分配 9 個 ints.
+    void* p5 = __gnu_cxx::__pool_alloc<int>().allocate(9);
+    cout << p5 << endl;
+    __gnu_cxx::__pool_alloc<int>().deallocate((int*)p5, 9);
+#endif
+
+    return 0;
+}
+```
+
+### 2.new expression
+
+使用new关键字之后编译器会把这串代码翻译为如下：
+
+![image-20230518143501227](D:\Typora\Images\image-20230518143501227.png)
+
+**new关键字使用之后重要的就执行了两步，第一步是分配内存，第二步是调用构造函数**
+
+### delete expression
+
+与new相对应的就有delete关键字
+
+**delete关键字使用的时候执行了两步，第一步是调用析构函数，第二步是释放内存**
+
+<img src="D:\Typora\Images\image-20230518150122803.png" alt="image-20230518150122803" style="zoom:67%;" />
+
+上面两副图片当中，**通过指针，构造函数不能被直接调用，而析构函数可以被直接调用**
+
+**如果非要调用的话，可以用 placement new** (现在不理解什么意思)
+
+```c++
+new(p) Complex(1,2);
+```
+
+以下是一个测试程序：
+
+```c++
+#include <iostream>
+using namespace std;
+#include <string>
+
+class A {
+public:
+    A() = default;
+    A(int id) : _id(id) { cout << "ctor. this = " << this << " id = " << id << endl; }
+    ~A() { cout << "dtor. this = " << this << endl; }
+
+    int _id;
+};
+
+int main() {
+    string* pstr = new string;
+    cout << "str= " << *pstr << endl;
+
+    // pstr->string::string("hello");  // ‘class std::__cxx11::basic_string<char>’ has no member named ‘string’
+    // pstr->~string();//crash
+
+    cout << "str= " << *pstr << endl;
+
+    A* pA = new A(1);
+    cout << pA->_id << endl;  // 1
+
+    // pA->A::A(3);//cannot call constructor ‘A::A’ directly
+    // A::A(5);
+
+    cout << pA->_id << endl;
+
+    delete pA;
+
+    return 0;
+}
+```
+
+### 3.array new,array delete
+
+注意：array new 一定要搭配 array delete，否则就极容易发生内存泄漏
+
+**这个内存泄露对于尤其是class with pointers，通常带有影响**
+
+因为对于没有指针的类，只需要释放这个类对象的指针就可以了，因此调用一次和三次的dtor没有明显的区别，换句话说就是这个类的dtor是trivial(不重要的)，但是带有指针的类就不一样了
+
+比如下面string那个例子，只换起一次dtor，那么三个string指向的东西只被释放了一个，然后整体就被释放了，剩余的两块内存怎么办呢？因此会导致内存泄漏
+
+![image-20230518154018869](D:\Typora\Images\image-20230518154018869.png)
+
+```c++
+#include <iostream>
+using namespace std;
+#define size 3
+
+class A {
+public:
+    A() : _id(0) { cout << "default ctor. this = " << this << " id = " << _id << endl; }
+    A(int id) : _id(id) { cout << "ctor. this = " << this << " id = " << _id << endl; }
+    ~A() { cout << "dtor. this = " << this << " id = " << _id << endl; }
+
+public:
+    int _id;
+};
+
+int main() {
+    A* buf = new A[size];  // A必须有默认构造函数，否则会报错
+    A* tmp = buf;
+
+    cout << "buf= " << buf << " tmp= " << tmp << endl;
+
+    for (int i = 0; i < size; ++i)
+        new (tmp++) A(i);  // placement new , ctor 三次
+
+    cout << "buf= " << buf << " tmp= " << tmp << endl;
+
+    delete[] buf;  // dtor 3次，次序反过来 3 2 1
+
+    return 0;
+}
+```
+
+执行结果
+
+<img src="D:\Typora\Images\image-20230518160118276.png" alt="image-20230518160118276" style="zoom:67%;" />
+
+### 内存分布
+
+内存的底层开辟和释放都是调用的malloc和free，那么调用了malloc之后会给我们的内存分布就如下所示：
+
+![image-20230518161942376](D:\Typora\Images\image-20230518161942376.png)
+
+可以浅谈一下这个内存是怎么分配的(后面都会进行深入的探究，以及每一块的作用)
+
+**Demo对象：3个int，占据12个字节，3个总共36个字节；**
+
+**由于他带有指针，所以需要额外记录这个数组对象包含Demo的个数，4个字节；**
+
+**这个真正有效的数据区域上下(黄色的部分)，分别占据32 + 4 个字节；**
+
+**内存块上下的两个cookie，各自4个字节，总共8个字节；**
+
+**上面一共加起来84个字节，需要调整到16个字节的倍数，也就是96个字节，多出的12个字节存放在Pad中**
+
+### 4.placement new
+
+**placement new允许我们将对象建造在已经分配好的内存当中！！**
+
+![image-20230518163205880](D:\Typora\Images\image-20230518163205880.png)
+
+**编译器翻译成为的那三个操作，在 placement new 下面，第一条由于传入了一个指针，那么会调用重载的版本，其实就是表示不用新开内存，把原来的给我就行；然后第三条编译器就调用构造函数在已有的内存上进行创建对象初始化!!!!**
+
+```c++
+#include <iostream>
+using namespace std;
+
+class Complex {
+public:
+    Complex() : _re(0), _im(0) {}
+    Complex(double re, double im) : _re(re), _im(im) {}
+
+public:
+    double _re, _im;
+};
+
+int main() {
+    char* buf = new char[sizeof(Complex) * 3];
+    // 现在想把一个Complex对象动态开辟在buf的一个Complex单元，调用placement new
+    Complex* pc = new (buf) Complex(1, 2);
+
+    delete[]buf;
+    
+    return 0;
+}
+```
+
+### 5.重载
+
+![image-20230518164140667](D:\Typora\Images\image-20230518164140667.png)
+
+**重载比较多的就是在类中去重载 operator new和 operator delete，这样编译器在调用new或者delete关键字解析到那两步的时候就会优先调用我们重载的版本，在我们重载的版本当中可以设计一些专用于这个类的设计，这样或许能够提高效率和节省开销**
+
+在类里面重载
+
+![image-20230518170044346](D:\Typora\Images\image-20230518170044346.png)
+
+ ![image-20230518171104774](D:\Typora\Images\image-20230518171104774.png)
+
+delete中的第二参数是optional的，可以写也可以不写
+
